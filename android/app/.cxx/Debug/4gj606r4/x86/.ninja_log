@@ -1,0 +1,6 @@
+# ninja log v5
+0	13	0	clean	2fbcb0ab13b85222
+0	9	0	clean	2fbcb0ab13b85222
+13	951	7933048056137808	CMakeFiles/carddetector.dir/CardDetectorJNI.cpp.o	8b77bbb89ffd96b
+0	1223	7933048058903909	CMakeFiles/carddetector.dir/CardDetector.cpp.o	1ea6c6d6b98a20e2
+1223	2331	7933048069469430	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86/libcarddetector.so	8af5591eedb6d3b1

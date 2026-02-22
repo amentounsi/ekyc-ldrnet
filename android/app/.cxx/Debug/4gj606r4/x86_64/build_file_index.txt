@@ -1,0 +1,6 @@
+C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\CMakeLists.txt
+C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\OpenCV-android-sdk\sdk\native\jni\abi-x86_64\OpenCVConfig.cmake
+C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\OpenCV-android-sdk\sdk\native\jni\abi-x86_64\OpenCVModules-release.cmake
+C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\OpenCV-android-sdk\sdk\native\jni\abi-x86_64\OpenCVModules.cmake
+C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\OpenCV-android-sdk\sdk\native\jni\OpenCVConfig-version.cmake
+C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\OpenCV-android-sdk\sdk\native\jni\OpenCVConfig.cmake

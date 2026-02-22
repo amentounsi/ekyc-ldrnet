@@ -1,0 +1,307 @@
+/**
+ * CameraScreen Component
+ * Main camera screen with real-time card detection overlay
+ */
+
+import React, { useCallback, useEffect, useState, useRef } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  Dimensions,
+  StatusBar,
+  Platform,
+  PermissionsAndroid,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  CameraPosition,
+} from 'react-native-vision-camera';
+import { useCardDetection } from '../hooks/useCardDetection';
+import CardOverlay from '../components/CardOverlay';
+import type { CardDetectionResult } from '../types/cardDetection';
+
+/**
+ * Screen dimensions
+ */
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+/**
+ * Camera screen props
+ */
+interface CameraScreenProps {
+  /** Camera position */
+  cameraPosition?: CameraPosition;
+  
+  /** Enable torch */
+  enableTorch?: boolean;
+  
+  /** Callback when card is detected */
+  onCardDetected?: (result: CardDetectionResult) => void;
+  
+  /** Show debug info */
+  showDebugInfo?: boolean;
+}
+
+/**
+ * CameraScreen component
+ */
+export const CameraScreen: React.FC<CameraScreenProps> = ({
+  cameraPosition = 'back',
+  enableTorch = false,
+  onCardDetected,
+  showDebugInfo = true,
+}) => {
+  // Camera permission
+  const { hasPermission, requestPermission } = useCameraPermission();
+  
+  // Camera device
+  const device = useCameraDevice(cameraPosition);
+  
+  // State
+  const [isActive, setIsActive] = useState(true);
+  const [viewDimensions, setViewDimensions] = useState({
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+  });
+  
+  // Camera ref
+  const cameraRef = useRef<Camera>(null);
+  
+  // Card detection hook
+  const {
+    detectionResult,
+    isReady,
+    frameProcessor,
+    scaledCorners,
+  } = useCardDetection({
+    enabled: isActive && hasPermission,
+    onCardDetected,
+    throttleMs: 50, // Update every 50ms for smoother overlay
+  });
+
+  /**
+   * Request camera permission on mount
+   */
+  useEffect(() => {
+    const requestCameraPermission = async () => {
+      if (Platform.OS === 'android') {
+        try {
+          const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.CAMERA,
+            {
+              title: 'Camera Permission',
+              message: 'This app needs access to your camera to scan ID cards.',
+              buttonNeutral: 'Ask Me Later',
+              buttonNegative: 'Cancel',
+              buttonPositive: 'OK',
+            }
+          );
+          
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+            Alert.alert(
+              'Permission Required',
+              'Camera permission is required to scan ID cards.'
+            );
+          }
+        } catch (err) {
+          console.error('Error requesting camera permission:', err);
+        }
+      } else {
+        await requestPermission();
+      }
+    };
+
+    if (!hasPermission) {
+      requestCameraPermission();
+    }
+  }, [hasPermission, requestPermission]);
+
+  /**
+   * Handle view layout to get dimensions
+   */
+  const onLayout = useCallback((event: any) => {
+    const { width, height } = event.nativeEvent.layout;
+    setViewDimensions({ width, height });
+  }, []);
+
+  /**
+   * Render loading state
+   */
+  if (!hasPermission) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#000" />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#00FF00" />
+          <Text style={styles.loadingText}>Requesting camera permission...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  /**
+   * Render no device state
+   */
+  if (device == null) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#000" />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>No camera device found</Text>
+        </View>
+      </View>
+    );
+  }
+
+  /**
+   * Render camera not ready state
+   */
+  if (!isReady) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#000" />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#00FF00" />
+          <Text style={styles.loadingText}>Initializing card detector...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container} onLayout={onLayout}>
+      <StatusBar barStyle="light-content" backgroundColor="#000" translucent />
+      
+      {/* Camera */}
+      <Camera
+        ref={cameraRef}
+        style={StyleSheet.absoluteFill}
+        device={device}
+        isActive={isActive}
+        frameProcessor={frameProcessor}
+        torch={enableTorch ? 'on' : 'off'}
+        pixelFormat="yuv"
+        orientation="portrait"
+      />
+      
+      {/* Detection Overlay - Shows when card detected */}
+      {detectionResult?.isValid && detectionResult.corners.length === 4 && (
+        <CardOverlay
+          corners={detectionResult.corners}
+          frameWidth={detectionResult.frameWidth || viewDimensions.width}
+          frameHeight={detectionResult.frameHeight || viewDimensions.height}
+          viewWidth={viewDimensions.width}
+          viewHeight={viewDimensions.height}
+          isValid={detectionResult.isValid}
+          showCornerMarkers={true}
+          showEdgeLines={true}
+        />
+      )}
+      
+      {/* Instructions */}
+      <View style={styles.instructionsContainer}>
+        <Text style={styles.instructionsText}>
+          Position your ID card within the camera view
+        </Text>
+        {detectionResult?.isValid && (
+          <Text style={styles.detectedText}>Card Detected!</Text>
+        )}
+      </View>
+      
+      {/* Debug Info */}
+      {showDebugInfo && (
+        <View style={styles.debugContainer}>
+          <Text style={styles.debugText}>
+            Detection: {detectionResult?.isValid ? 'Valid' : 'None'}
+          </Text>
+          <Text style={styles.debugText}>
+            Confidence: {detectionResult?.confidence?.toFixed(2) || 'N/A'}
+          </Text>
+          <Text style={styles.debugText}>
+            Frame: {detectionResult?.frameWidth}x{detectionResult?.frameHeight}
+          </Text>
+          <Text style={styles.debugText}>
+            View: {viewDimensions.width.toFixed(0)}x{viewDimensions.height.toFixed(0)}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 16,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+  },
+  errorText: {
+    color: '#ff0000',
+    fontSize: 18,
+    textAlign: 'center',
+  },
+  instructionsContainer: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  instructionsText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  detectedText: {
+    color: '#00FF00',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginTop: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  debugContainer: {
+    position: 'absolute',
+    bottom: 40,
+    left: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 12,
+    borderRadius: 8,
+  },
+  debugText: {
+    color: '#00FF00',
+    fontSize: 12,
+    fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
+    marginBottom: 4,
+  },
+});
+
+export default CameraScreen;

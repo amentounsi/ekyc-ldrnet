@@ -1,0 +1,43 @@
+{
+  "buildFiles": [
+    "C:\\Users\\USER\\Desktop\\PFE projet\\android\\app\\src\\main\\cpp\\CMakeLists.txt",
+    "C:\\Users\\USER\\Desktop\\PFE projet\\android\\app\\src\\main\\cpp\\OpenCV-android-sdk\\sdk\\native\\jni\\abi-arm64-v8a\\OpenCVConfig.cmake",
+    "C:\\Users\\USER\\Desktop\\PFE projet\\android\\app\\src\\main\\cpp\\OpenCV-android-sdk\\sdk\\native\\jni\\abi-arm64-v8a\\OpenCVModules-release.cmake",
+    "C:\\Users\\USER\\Desktop\\PFE projet\\android\\app\\src\\main\\cpp\\OpenCV-android-sdk\\sdk\\native\\jni\\abi-arm64-v8a\\OpenCVModules.cmake",
+    "C:\\Users\\USER\\Desktop\\PFE projet\\android\\app\\src\\main\\cpp\\OpenCV-android-sdk\\sdk\\native\\jni\\OpenCVConfig-version.cmake",
+    "C:\\Users\\USER\\Desktop\\PFE projet\\android\\app\\src\\main\\cpp\\OpenCV-android-sdk\\sdk\\native\\jni\\OpenCVConfig.cmake"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "C:\\Users\\USER\\AppData\\Local\\Android\\Sdk\\cmake\\3.22.1\\bin\\ninja.exe",
+      "-C",
+      "C:\\Users\\USER\\Desktop\\PFE projet\\android\\app\\.cxx\\Debug\\4gj606r4\\arm64-v8a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "C:\\Users\\USER\\AppData\\Local\\Android\\Sdk\\cmake\\3.22.1\\bin\\ninja.exe",
+    "-C",
+    "C:\\Users\\USER\\Desktop\\PFE projet\\android\\app\\.cxx\\Debug\\4gj606r4\\arm64-v8a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "carddetector::@6890427a1f51a3e7e1df": {
+      "toolchain": "toolchain",
+      "abi": "arm64-v8a",
+      "artifactName": "carddetector",
+      "output": "C:\\Users\\USER\\Desktop\\PFE projet\\android\\app\\build\\intermediates\\cxx\\Debug\\4gj606r4\\obj\\arm64-v8a\\libcarddetector.so",
+      "runtimeFiles": []
+    }
+  },
+  "toolchains": {
+    "toolchain": {
+      "cCompilerExecutable": "C:\\Users\\USER\\AppData\\Local\\Android\\Sdk\\ndk\\25.1.8937393\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang.exe",
+      "cppCompilerExecutable": "C:\\Users\\USER\\AppData\\Local\\Android\\Sdk\\ndk\\25.1.8937393\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe"
+    }
+  },
+  "cFileExtensions": [],
+  "cppFileExtensions": [
+    "cpp"
+  ]
+}
