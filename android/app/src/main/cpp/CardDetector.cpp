@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <chrono>
 #include <android/log.h>
 
 #define LOG_TAG "CardDetector"
@@ -27,8 +28,15 @@ namespace CardDetection {
 // Construction
 // ──────────────────────────────────────────────
 
-CardDetector::CardDetector()  : config_() {}
-CardDetector::CardDetector(const DetectionConfig& cfg) : config_(cfg) {}
+CardDetector::CardDetector()
+    : config_()
+    , lastDetectionTime_(std::chrono::steady_clock::now()
+                         - std::chrono::milliseconds(1000)) {}
+
+CardDetector::CardDetector(const DetectionConfig& cfg)
+    : config_(cfg)
+    , lastDetectionTime_(std::chrono::steady_clock::now()
+                         - std::chrono::milliseconds(1000)) {}
 CardDetector::~CardDetector() = default;
 
 void CardDetector::setConfig(const DetectionConfig& cfg) { config_ = cfg; }
@@ -45,6 +53,15 @@ void CardDetector::setCrMat(const cv::Mat& cr) {
 CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
     CardDetectionResult result;
     if (frame.empty()) { LOGD("detectCard: empty frame"); return result; }
+
+    // ── Throttle: limit to ~15 FPS to reduce CPU load ──
+    auto now = std::chrono::steady_clock::now();
+    long long elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - lastDetectionTime_).count();
+    if (elapsedMs < kMinProcessIntervalMs) {
+        return lastResult_;  // return cached result (visually smooth)
+    }
+    lastDetectionTime_ = now;
 
     const int origW = frame.cols;
     const int origH = frame.rows;
@@ -99,6 +116,7 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
             temporalBuf_.resize(config_.temporalBufferSize);
         temporalBuf_[temporalIdx_ % config_.temporalBufferSize].isValid = false;
         temporalIdx_++;
+        lastResult_ = result;
         return result;
     }
 
@@ -113,6 +131,7 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
             temporalBuf_.resize(config_.temporalBufferSize);
         temporalBuf_[temporalIdx_ % config_.temporalBufferSize].isValid = false;
         temporalIdx_++;
+        lastResult_ = result;
         return result;
     }
 
@@ -123,25 +142,31 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
     LOGD("Stage4: bestScore=%.3f  areaRatio=%.3f  aspect=%.3f  rect=%.3f",
          best.score, best.areaRatio, best.aspectRatio, best.rectangularity);
 
-    // Stage 5 – geometric validation
-    bool geomOk = (best.score   >= config_.minScore &&
+    // Stage 5 – geometric floor check (area in range, geometry score above floor)
+    bool geomOk = (best.score   >= config_.minGeometryScore &&
                    best.areaRatio >= config_.minAreaRatio &&
                    best.areaRatio <= config_.maxAreaRatio);
 
     if (!geomOk) {
-        LOGD("Stage5: REJECTED geometry  score=%.3f areaRatio=%.3f", best.score, best.areaRatio);
+        LOGD("Stage5: REJECTED geometry  score=%.3f areaRatio=%.3f (minGeo=%.2f)",
+             best.score, best.areaRatio, config_.minGeometryScore);
         if (static_cast<int>(temporalBuf_.size()) < config_.temporalBufferSize)
             temporalBuf_.resize(config_.temporalBufferSize);
         temporalBuf_[temporalIdx_ % config_.temporalBufferSize].isValid = false;
         temporalIdx_++;
+        lastResult_ = result;
         return result;
     }
-    LOGD("Stage5: geometry OK");
+    LOGD("Stage5: geometry OK (score=%.3f)", best.score);
+
+    // Border contrast score (computed here using gray procFrame)
+    float borderScore = calcBorderContrast(best.quad, procFrame);
+    LOGD("Stage5b: borderScore=%.3f", borderScore);
 
     // Stage 6 – red corner validation
     float redScore = 0.f;
     if (config_.redValidationEnabled && !procCr.empty()) {
-        redScore = validateRedCorners(best.quad, procCr, W, H);
+        redScore = validateRedCorners(best.quad, procCr, procFrame, W, H);
         result.debug.redScore     = redScore;
         result.debug.redValidated = (redScore > 0.f);
         LOGD("Stage6: redScore=%.3f  validated=%d", redScore, result.debug.redValidated ? 1 : 0);
@@ -151,15 +176,28 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
                 temporalBuf_.resize(config_.temporalBufferSize);
             temporalBuf_[temporalIdx_ % config_.temporalBufferSize].isValid = false;
             temporalIdx_++;
+            lastResult_ = result;
             return result;
         }
     } else if (config_.redValidationEnabled && procCr.empty()) {
         LOGD("Stage6: SKIPPED (no Cr mat)");
     }
 
-    // Compute final confidence incorporating red score
-    float confidence = best.score;
-    if (redScore > 0.f) confidence = best.score * 0.85f + redScore * 0.15f;
+    // Final confidence = geometry*0.5 + border*0.3 + red*0.2
+    float confidence = best.score * 0.5f + borderScore * 0.3f + redScore * 0.2f;
+    LOGD("Stage6b: confidence=%.3f (geo=%.3f*0.5 + border=%.3f*0.3 + red=%.3f*0.2)",
+         confidence, best.score, borderScore, redScore);
+
+    // Final score gate
+    if (confidence < config_.minScore) {
+        LOGD("Stage5c: REJECTED final confidence=%.3f < %.3f", confidence, config_.minScore);
+        if (static_cast<int>(temporalBuf_.size()) < config_.temporalBufferSize)
+            temporalBuf_.resize(config_.temporalBufferSize);
+        temporalBuf_[temporalIdx_ % config_.temporalBufferSize].isValid = false;
+        temporalIdx_++;
+        lastResult_ = result;
+        return result;
+    }
 
     // Build validated result (corners in original frame coordinates)
     auto corners = sortCorners(best.quad);
@@ -188,13 +226,14 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
         result.isValid    = true;
         result.confidence = confidence;
         result.corners    = corners;
-        LOGI("DETECTED  score=%.2f  confidence=%.2f  redScore=%.2f",
-             best.score, confidence, redScore);
+        LOGI("DETECTED  score=%.2f  confidence=%.2f  border=%.2f  red=%.2f",
+             best.score, confidence, borderScore, redScore);
     } else {
         LOGD("Stage7: waiting for temporal confirmation (%d/%d)",
-             validCount, config_.temporalMinValid);
+             validCount, config_.temporalBufferSize);
     }
 
+    lastResult_ = result;
     return result;
 }
 
@@ -219,37 +258,56 @@ cv::Mat CardDetector::preprocessFrame(const cv::Mat& input) {
              gray_.cols, gray_.rows, m[0], s[0]);
     }
 
-    // 1-b  BilateralFilter – preserves edges, removes noise inside card
-    //      Works on grayscale directly.
-    cv::bilateralFilter(gray_, blurred_, config_.bilateralD,
-                        config_.bilateralSigmaColor, config_.bilateralSigmaSpace);
+    // 1-b  CLAHE – local contrast enhancement before blur.
+    //      Restores weak card/background edge (e.g. white card on beige desk).
+    //      Applied on gray BEFORE GaussianBlur so blur doesn't erase the boost.
+    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(
+        config_.claheClipLimit,
+        cv::Size(config_.claheTileSize, config_.claheTileSize));
+    cv::Mat claheOut;
+    clahe->apply(gray_, claheOut);
 
-    // 1-c  Adaptive Canny – thresholds derived from blurred image median
-    //      Calculate median intensity
-    cv::Mat flat;
-    blurred_.reshape(1, 1).copyTo(flat);
-    std::sort(flat.begin<uchar>(), flat.end<uchar>());
-    double med = static_cast<double>(flat.at<uchar>(flat.total() / 2));
-    int cannyLow  = std::max(10, static_cast<int>(med * config_.cannyMedianLow));
-    int cannyHigh = std::min(250, static_cast<int>(med * config_.cannyMedianHigh));
-    LOGD("Stage1: adaptiveCanny  median=%.0f  low=%d  high=%d", med, cannyLow, cannyHigh);
+    // 1-c  GaussianBlur – smooth noise after CLAHE
+    int ks = (config_.gaussianBlurSize % 2 == 0) ? config_.gaussianBlurSize + 1
+                                                  : config_.gaussianBlurSize;
+    cv::GaussianBlur(claheOut, blurred_, cv::Size(ks, ks), 0);
 
-    cv::Canny(blurred_, edges_, cannyLow, cannyHigh);
+    // 1-c  Adaptive Canny – thresholds derived from median of CENTRAL ROI only.
+    //      Using the full-frame median includes uniform background (beige desk etc.)
+    //      which lowers the median and miscalibrates Canny thresholds.
+    //      Central 40% region captures contrasted card/background boundary.
+    {
+        int rx = blurred_.cols * 3 / 10;
+        int ry = blurred_.rows * 3 / 10;
+        int rw = blurred_.cols * 4 / 10;
+        int rh = blurred_.rows * 4 / 10;
+        // clamp to valid bounds
+        rx = std::max(0, std::min(rx, blurred_.cols - 2));
+        ry = std::max(0, std::min(ry, blurred_.rows - 2));
+        rw = std::max(2, std::min(rw, blurred_.cols - rx));
+        rh = std::max(2, std::min(rh, blurred_.rows - ry));
+        cv::Mat roiBlurred = blurred_(cv::Rect(rx, ry, rw, rh));
+        cv::Mat flat;
+        roiBlurred.clone().reshape(1, 1).copyTo(flat);  // clone() → makes contiguous before reshape
+        std::sort(flat.begin<uchar>(), flat.end<uchar>());
+        double med = static_cast<double>(flat.at<uchar>(flat.total() / 2));
+        // Cap thresholds: card border on light bg has gradient ~20-30, so low must stay ≤20
+        int cannyLow  = std::max(10, std::min(20, static_cast<int>(med * config_.cannyMedianLow)));
+        int cannyHigh = std::max(cannyLow + 20,
+                                 std::min(50, static_cast<int>(med * config_.cannyMedianHigh)));
+        LOGD("Stage1: adaptiveCanny (central ROI %dx%d)  median=%.0f  low=%d  high=%d",
+             rw, rh, med, cannyLow, cannyHigh);
+        cv::Canny(blurred_, edges_, cannyLow, cannyHigh);
+    }
 
     // Save raw Canny BEFORE morphological ops (for edge density check in Stage 3)
     cannyEdges_ = edges_.clone();
 
-    // 1-d  Morphological Closing (bridge broken edges at card border)
-    int m = config_.morphCloseSize | 1;
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(m, m));
-    cv::morphologyEx(edges_, edges_, cv::MORPH_CLOSE, kernel);
-
-    // 1-e  Dilate (connect last gaps so findContours gets a closed outline)
-    if (config_.dilateSize > 0) {
-        int dk = config_.dilateSize | 1;
-        cv::Mat dk_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(dk, dk));
-        cv::dilate(edges_, edges_, dk_kernel);
-    }
+    // 1-d  Single 3×3 dilate to reconnect fragmented card border edges.
+    //      Avoids heavy morphClose which can merge unrelated edges.
+    //      One iteration is sufficient to close 1-2px gaps from low-contrast borders.
+    cv::Mat dk3 = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+    cv::dilate(edges_, edges_, dk3, cv::Point(-1,-1), 1);
 
     return edges_.clone();
 }
@@ -393,9 +451,10 @@ CardDetector::rankContours(
         cand.area           = bestApproxArea;
         cand.areaRatio      = approxAreaRatio;  // use approx area (consistent with Stage 5 check)
         cand.aspectRatio    = aspectRatio;
-        cand.rectangularity = calcRectangularity(bestApprox);
-        cand.centerDist     = calcCenterDistance(bestApprox, imgW, imgH);
-        cand.edgeDensity    = edgeDensity;
+        cand.rectangularity    = calcRectangularity(bestApprox);
+        cand.centerDist        = calcCenterDistance(bestApprox, imgW, imgH);
+        cand.edgeDensity       = edgeDensity;
+        // borderContrastScore needs gray mat — computed in detectCard after selection
 
         LOGD("Stage3: contour[%zu] CANDIDATE area=%.0f(%.1f%%)  aspect=%.3f  rect=%.3f  center=%.3f",
              i, cand.area, cand.areaRatio * 100, cand.aspectRatio,
@@ -528,43 +587,43 @@ float CardDetector::calcEdgeDensity(
 // ══════════════════════════════════════════════
 
 /**
- * Check all 4 corners of the quad for the red drapeau tunisien.
- * Uses the Cr (V) channel from YUV: Cr > threshold → red-ish.
- * Works in all card orientations – checks every corner, passes if ANY one has red.
- * Returns 1.0 (strict match), 0.6 (loose match), or 0.0 (no red found).
+ * validateRedCorners — 3-condition red flag check for Tunisian CIN card.
+ *
+ * The Tunisian flag occupies roughly the TL corner of the card (any orientation
+ * after perspective). All 4 corners are checked; at least ONE must satisfy:
+ *   1. redRatio   >= 4%  (Cr > 145 pixels / zone area)
+ *   2. whiteRatio >= 35% (Y > 180 pixels  / zone area) — card background is white
+ *   3. clusterRatio >= 2% (largest compact red contour / zone area) — flag is a block,
+ *      not scattered pixels like a colorful PC screen
+ *
+ * Returns max corner score (1.0 = strong red, 0.8 = valid but weaker).
+ * Returns 0.0 if no corner satisfies all 3 conditions.
  */
 float CardDetector::validateRedCorners(
     const std::vector<cv::Point>& quad,
     const cv::Mat& crMat,
+    const cv::Mat& grayMat,
     int procW, int procH)
 {
     if (quad.size() != 4 || crMat.empty()) return 0.f;
 
-    // Sort corners: TL, TR, BR, BL
     auto sortedPts = sortCorners(quad);
 
-    // crMat is at procW x procH (same scale as processed gray)
-    float qW = 0.f, qH = 0.f;
-    // Estimate quad width/height from sorted corners
-    qW = std::max({std::abs(sortedPts[1].x - sortedPts[0].x),
-                   std::abs(sortedPts[2].x - sortedPts[3].x), 1.f});
-    qH = std::max({std::abs(sortedPts[3].y - sortedPts[0].y),
-                   std::abs(sortedPts[2].y - sortedPts[1].y), 1.f});
+    float qW = std::max({std::abs(sortedPts[1].x - sortedPts[0].x),
+                         std::abs(sortedPts[2].x - sortedPts[3].x), 1.f});
+    float qH = std::max({std::abs(sortedPts[3].y - sortedPts[0].y),
+                         std::abs(sortedPts[2].y - sortedPts[1].y), 1.f});
 
-    int zoneW = std::max(4, static_cast<int>(qW * config_.redCornerZoneW));
-    int zoneH = std::max(4, static_cast<int>(qH * config_.redCornerZoneH));
+    int zoneW = std::max(6, static_cast<int>(qW * config_.redCornerZoneW));
+    int zoneH = std::max(6, static_cast<int>(qH * config_.redCornerZoneH));
 
-    float bestStrict = 0.f, bestLoose = 0.f;
+    float bestScore = 0.f;
 
     for (int ci = 0; ci < 4; ci++) {
         int cx = static_cast<int>(sortedPts[ci].x);
         int cy = static_cast<int>(sortedPts[ci].y);
 
-        // Each corner extends INWARD:
-        // ci=0 TL → extend right + down
-        // ci=1 TR → extend left  + down
-        // ci=2 BR → extend left  + up
-        // ci=3 BL → extend right + up
+        // Each corner extends INWARD toward the card center:
         int x0, y0;
         switch (ci) {
             case 0: x0 = cx;         y0 = cy;         break; // TL
@@ -572,7 +631,6 @@ float CardDetector::validateRedCorners(
             case 2: x0 = cx - zoneW; y0 = cy - zoneH; break; // BR
             default: x0 = cx;        y0 = cy - zoneH; break; // BL
         }
-        // Clamp to crMat bounds
         x0 = std::max(0, std::min(x0, crMat.cols - 1));
         y0 = std::max(0, std::min(y0, crMat.rows - 1));
         int x1 = std::min(x0 + zoneW, crMat.cols);
@@ -580,35 +638,134 @@ float CardDetector::validateRedCorners(
         if (x1 <= x0 || y1 <= y0) continue;
 
         cv::Rect roi(x0, y0, x1 - x0, y1 - y0);
-        cv::Mat zone = crMat(roi);
-        int total = zone.rows * zone.cols;
+        cv::Mat zoneCr = crMat(roi);
+        int total = zoneCr.rows * zoneCr.cols;
         if (total == 0) continue;
 
-        // Count pixels above thresholds
-        int cntStrict = cv::countNonZero(zone > config_.redCrThresholdStrict);
-        int cntLoose  = cv::countNonZero(zone > config_.redCrThresholdLoose);
-        float rS = static_cast<float>(cntStrict) / total;
-        float rL = static_cast<float>(cntLoose)  / total;
+        // --- Condition 1: red ratio (Cr channel) ---
+        cv::Mat redMask;
+        cv::threshold(zoneCr, redMask, config_.redCrThreshold, 255, cv::THRESH_BINARY);
+        int cntRed = cv::countNonZero(redMask);
+        float redRatio = static_cast<float>(cntRed) / total;
 
-        LOGD("  RedCorner[%d] zone(%d,%d %dx%d) strict=%.3f loose=%.3f",
-             ci, x0, y0, x1-x0, y1-y0, rS, rL);
+        // --- Condition 2: white ratio (Y/gray channel) ---
+        float whiteRatio = 0.f;
+        if (!grayMat.empty() && roi.x + roi.width <= grayMat.cols &&
+                                 roi.y + roi.height <= grayMat.rows) {
+            cv::Mat zoneGray = grayMat(roi);
+            cv::Mat whiteMask;
+            cv::threshold(zoneGray, whiteMask, config_.redWhiteYThreshold, 255, cv::THRESH_BINARY);
+            int cntWhite = cv::countNonZero(whiteMask);
+            whiteRatio = static_cast<float>(cntWhite) / total;
+        }
 
-        bestStrict = std::max(bestStrict, rS);
-        bestLoose  = std::max(bestLoose,  rL);
+        // --- Condition 3: compact red cluster ---
+        float clusterRatio = 0.f;
+        if (cntRed > 0) {
+            std::vector<std::vector<cv::Point>> redContours;
+            cv::findContours(redMask.clone(), redContours,
+                             cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+            double maxA = 0;
+            for (auto& rc : redContours) maxA = std::max(maxA, cv::contourArea(rc));
+            clusterRatio = static_cast<float>(maxA) / total;
+        }
+
+        LOGD("  RedCorner[%d] zone(%d,%d %dx%d) red=%.3f white=%.3f cluster=%.3f",
+             ci, x0, y0, x1-x0, y1-y0, redRatio, whiteRatio, clusterRatio);
+
+        // All 3 conditions must pass
+        if (redRatio      >= config_.redMinRatio        &&
+            whiteRatio    >= config_.redWhiteMinRatio   &&
+            clusterRatio  >= config_.redClusterMinRatio) {
+            float cornerScore = (redRatio >= 0.08f) ? 1.0f : 0.8f;
+            bestScore = std::max(bestScore, cornerScore);
+            LOGD("  RedCorner[%d]: VALID score=%.2f", ci, cornerScore);
+        }
     }
 
-    if (bestStrict >= config_.redMinRatioStrict) {
-        LOGD("  RedCorner: CONFIRMED STRICT (%.3f)", bestStrict);
-        return 1.0f;
+    if (bestScore == 0.f) {
+        LOGD("  RedCorner: REJECTED — no corner passed all 3 checks");
+    } else {
+        LOGD("  RedCorner: CONFIRMED (bestScore=%.2f)", bestScore);
     }
-    if (bestLoose >= config_.redMinRatioLoose) {
-        LOGD("  RedCorner: CONFIRMED LOOSE (%.3f)", bestLoose);
-        return 0.6f;
+    return bestScore;
+}
+
+// ══════════════════════════════════════════════
+// Border Contrast Score
+// ══════════════════════════════════════════════
+
+/**
+ * Measures the average gray gradient perpendicular to each side of the quad.
+ * A real card has a bright white border → strong contrast with the background.
+ * A PC monitor has a thin dark bezel → weak contrast.
+ *
+ * For each side, samples 30 points. At each point:
+ *   inner pixel = 4px inside the quad along the inward normal
+ *   outer pixel = 4px outside the quad along the outward normal
+ *   contribution = |gray_inner − gray_outer|
+ *
+ * Returns score in [0, 1] where 1 = contrast >= borderContrastNorm (50 gray levels).
+ */
+float CardDetector::calcBorderContrast(
+    const std::vector<cv::Point>& quad,
+    const cv::Mat& grayMat)
+{
+    if (quad.size() != 4 || grayMat.empty()) return 0.f;
+
+    // Compute centroid for inward normal direction
+    float cx = 0.f, cy = 0.f;
+    for (auto& p : quad) { cx += p.x; cy += p.y; }
+    cx /= 4.f; cy /= 4.f;
+
+    const int N      = 30;   // samples per side
+    const int offset = 4;    // pixels from border, both inner and outer
+    float totalContrast = 0.f;
+    int   totalSamples  = 0;
+
+    for (int s = 0; s < 4; s++) {
+        cv::Point p1 = quad[s];
+        cv::Point p2 = quad[(s + 1) % 4];
+
+        float dx  = static_cast<float>(p2.x - p1.x);
+        float dy  = static_cast<float>(p2.y - p1.y);
+        float len = std::sqrt(dx * dx + dy * dy);
+        if (len < 1.f) continue;
+
+        // Unit normal perpendicular to edge
+        float nx = -dy / len;
+        float ny =  dx / len;
+
+        // Ensure normal points inward (toward centroid)
+        float mx  = (p1.x + p2.x) / 2.f;
+        float my  = (p1.y + p2.y) / 2.f;
+        if (nx * (cx - mx) + ny * (cy - my) < 0.f) { nx = -nx; ny = -ny; }
+
+        for (int k = 0; k <= N; k++) {
+            float t  = static_cast<float>(k) / N;
+            float bx = p1.x + t * dx;
+            float by = p1.y + t * dy;
+
+            int ix = static_cast<int>(bx + nx * offset);
+            int iy = static_cast<int>(by + ny * offset);
+            int ox = static_cast<int>(bx - nx * offset);
+            int oy = static_cast<int>(by - ny * offset);
+
+            if (ix < 0 || ix >= grayMat.cols || iy < 0 || iy >= grayMat.rows) continue;
+            if (ox < 0 || ox >= grayMat.cols || oy < 0 || oy >= grayMat.rows) continue;
+
+            float inner = static_cast<float>(grayMat.at<uchar>(iy, ix));
+            float outer = static_cast<float>(grayMat.at<uchar>(oy, ox));
+            totalContrast += std::abs(inner - outer);
+            totalSamples++;
+        }
     }
-    LOGD("  RedCorner: REJECTED best strict=%.3f loose=%.3f (min=%.3f/%.3f)",
-         bestStrict, bestLoose,
-         config_.redMinRatioStrict, config_.redMinRatioLoose);
-    return 0.f;
+
+    if (totalSamples == 0) return 0.f;
+    float meanContrast = totalContrast / static_cast<float>(totalSamples);
+    float score = std::min(meanContrast / config_.borderContrastNorm, 1.f);
+    LOGD("  borderContrast: mean=%.1f  score=%.3f", meanContrast, score);
+    return score;
 }
 
 // ══════════════════════════════════════════════

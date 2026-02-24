@@ -82,9 +82,9 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeSetConfig(
     if (!g_detector) { LOGE("not initialised"); return; }
 
     CardDetection::DetectionConfig cfg;
-    // cannyLow/High are now adaptive (ignored); blurSize maps to bilateralD
+    // cannyLow/High are now adaptive (ignored); blurSize maps to gaussianBlurSize
     (void)cannyLow; (void)cannyHigh;
-    cfg.bilateralD         = (blurSize > 0) ? blurSize : 9;
+    cfg.gaussianBlurSize   = (blurSize > 0 && blurSize <= 15) ? blurSize : 5;
     cfg.minAreaRatio       = minArea;
     cfg.maxAreaRatio       = maxArea;
     cfg.targetAspectRatio  = targetRatio;

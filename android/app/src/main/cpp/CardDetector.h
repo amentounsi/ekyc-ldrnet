@@ -22,6 +22,7 @@
 #include <vector>
 #include <array>
 #include <string>
+#include <chrono>
 
 namespace CardDetection {
 
@@ -40,15 +41,16 @@ struct Point2D {
  * Intermediate candidate produced by Stage 3
  */
 struct ContourCandidate {
-    std::vector<cv::Point> quad;       // 4 corners
-    double area            = 0.0;
-    double areaRatio       = 0.0;      // area / imageArea
-    float  aspectRatio     = 0.f;
-    float  rectangularity  = 0.f;      // how close angles are to 90 deg
-    float  centerDist      = 0.f;      // normalised dist quad-centre to img-centre
-    float  edgeDensity     = 0.f;      // fraction of border with real Canny edges
-    float  redScore        = 0.f;      // Stage 6: red corner validation score
-    float  score           = 0.f;      // composite score (Stage 4)
+    std::vector<cv::Point> quad;           // 4 corners
+    double area                  = 0.0;
+    double areaRatio             = 0.0;    // area / imageArea
+    float  aspectRatio           = 0.f;
+    float  rectangularity        = 0.f;    // how close angles are to 90 deg
+    float  centerDist            = 0.f;    // normalised dist quad-centre to img-centre
+    float  edgeDensity           = 0.f;    // fraction of border with real Canny edges
+    float  borderContrastScore   = 0.f;    // inner/outer gradient across quad edges
+    float  redScore              = 0.f;    // Stage 6: red corner validation score
+    float  score                 = 0.f;    // composite geometry score (Stage 4)
 };
 
 /**
@@ -92,25 +94,25 @@ struct CardDetectionResult {
 
 struct DetectionConfig {
     // --- Stage 1: preprocessing ---
-    // BilateralFilter (preserves edges better than GaussianBlur)
-    int   bilateralD           = 5;      // small d=5 for performance; 7 on high-end
-    float bilateralSigmaColor  = 20.f;   // keep LOW to preserve sharp edges
-    float bilateralSigmaSpace  = 20.f;   // keep LOW to preserve sharp edges
+    // CLAHE: local contrast enhancement (critical for card on light desk)
+    double claheClipLimit    = 2.0;   // higher = more contrast boost
+    int    claheTileSize     = 8;     // grid size (8x8 tiles at 480px)
+    int   gaussianBlurSize   = 5;     // applied AFTER CLAHE
     // Adaptive Canny (calculated AFTER blur on blurred image)
     float cannyMedianLow       = 0.33f;  // Canny low  = median * 0.33
     float cannyMedianHigh      = 1.10f;  // Canny high = median * 1.10
-    int   morphCloseSize       = 7;      // lighter than before
+    int   morphCloseSize       = 5;      // bridge broken edges at card border
     int   dilateSize           = 3;
-    int   processWidth         = 640;
+    int   processWidth         = 480;    // 44% fewer pixels vs 640
 
     // --- Stage 2: contour extraction ---
-    int topN                   = 5;
+    int topN                   = 8;
 
     // --- Stage 3: geometric filter ---
-    float minAreaRatio         = 0.02f;  // card far from camera
+    float minAreaRatio         = 0.015f; // lowered: card on light bg has fragmented contour
     float maxAreaRatio         = 0.85f;  // card very close to camera
     float targetAspectRatio    = 1.586f; // ID-1 standard (85.6 x 54 mm)
-    float aspectRatioTolerance = 0.35f;  // wider for perspective distortion
+    float aspectRatioTolerance = 0.20f;  // ±20% → range 1.27-1.90 (handles perspective)
     float edgeDensityThreshold = 0.20f;  // 2nd-worst side must have ≥20% real edges
 
     // --- Stage 4: scoring weights ---
@@ -121,16 +123,23 @@ struct DetectionConfig {
     float wCenter           = 0.10f;
 
     // --- Stage 5: final validation ---
-    float minScore          = 0.45f;
+    // minScore applies to FINAL confidence = geometry*0.5 + border*0.3 + red*0.2
+    float minScore          = 0.65f;
+    // Minimum geometry score floor (before combining with border/red)
+    float minGeometryScore  = 0.50f;
+    // BorderContrast normalization: contrast of 50 gray levels → score=1.0
+    float borderContrastNorm = 50.f;
 
-    // --- Stage 6: red corner validation (Cr channel, works in all 4 orientations) ---
-    bool  redValidationEnabled = true;
-    int   redCrThresholdStrict = 145;   // Cr > 145 → definitely red
-    int   redCrThresholdLoose  = 120;   // Cr > 120 → probably red
-    float redMinRatioStrict    = 0.04f; // ≥4% of corner zone = confirmed
-    float redMinRatioLoose     = 0.07f; // ≥7% of corner zone (loose pass)
-    float redCornerZoneW       = 0.18f; // 18% of quad width per corner zone
-    float redCornerZoneH       = 0.25f; // 25% of quad height per corner zone
+    // --- Stage 6: red corner validation ---
+    // Checks all 4 corners; at least 1 must pass ALL 3 conditions.
+    bool  redValidationEnabled   = true;
+    int   redCrThreshold         = 145;   // Cr > 145 → red (Tunisian flag red is vivid)
+    float redMinRatio            = 0.04f; // ≥4% of corner zone must be red
+    int   redWhiteYThreshold     = 180;   // Y > 180 → white pixel
+    float redWhiteMinRatio       = 0.35f; // ≥35% of zone must be white (card background)
+    float redClusterMinRatio     = 0.02f; // largest red contour ≥2% of zone (compact flag)
+    float redCornerZoneW         = 0.18f; // 18% of quad width per corner zone
+    float redCornerZoneH         = 0.25f; // 25% of quad height per corner zone
 
     // --- Stage 7: temporal buffer ---
     int temporalBufferSize     = 5;     // keep last N frames
@@ -191,6 +200,11 @@ private:
     cv::Mat cannyEdges_;   // raw Canny before morphological ops
     cv::Mat crMat_;        // Cr (V) channel for red validation
 
+    // Throttle: skip processing if called too soon (target 15 FPS max)
+    std::chrono::steady_clock::time_point lastDetectionTime_;
+    CardDetectionResult lastResult_;    // cached result for throttled frames
+    static constexpr int kMinProcessIntervalMs = 66;  // 66ms = ~15 FPS
+
     // Temporal buffer (Stage 7)
     struct TemporalEntry {
         bool  isValid = false;
@@ -204,9 +218,14 @@ private:
     float  calcEdgeDensity(const std::vector<cv::Point>& quad,
                            const cv::Mat& cannyEdges);
     /** Stage 6 – check Cr channel in all 4 corners for red flag */
+    /** Stage 6 – check all 4 corners for red+white cluster (Tunisian flag pattern) */
     float  validateRedCorners(const std::vector<cv::Point>& quad,
                               const cv::Mat& crMat,
+                              const cv::Mat& grayMat,
                               int procW, int procH);
+    /** Measure inner/outer gray gradient across quad border sides → [0,1] */
+    float  calcBorderContrast(const std::vector<cv::Point>& quad,
+                              const cv::Mat& grayMat);
     float  calcAspectRatio(const std::vector<cv::Point>& quad);
     float  calcRectangularity(const std::vector<cv::Point>& quad);
     float  calcCenterDistance(const std::vector<cv::Point>& quad,
