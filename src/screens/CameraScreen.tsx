@@ -3,7 +3,7 @@
  * Main camera screen with real-time card detection overlay
  */
 
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -22,7 +22,7 @@ import {
   CameraPosition,
 } from 'react-native-vision-camera';
 import { useCardDetection } from '../hooks/useCardDetection';
-import CardOverlay from '../components/CardOverlay';
+import CardOverlay, { CardGuideFrame, calculateOverlayBounds } from '../components/CardOverlay';
 import type { CardDetectionResult } from '../types/cardDetection';
 
 /**
@@ -72,6 +72,15 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   // Camera ref
   const cameraRef = useRef<Camera>(null);
   
+  // State for overlay bounds and configuration
+  const [overlayEnabled, setOverlayEnabled] = useState(false);
+  const [overlayBounds, setOverlayBounds] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  
   // Card detection hook
   const {
     detectionResult,
@@ -82,7 +91,27 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     enabled: isActive && hasPermission,
     onCardDetected,
     throttleMs: 50, // Update every 50ms for smoother overlay
+    useOverlay: overlayEnabled,
+    overlayBounds,
+    useROICropping: false,  // Full frame detection; overlay used for constraint validation only
   });
+  
+  // Calculate and set overlay bounds once we have frame dimensions
+  useEffect(() => {
+    if (detectionResult?.frameWidth && detectionResult?.frameHeight && !overlayEnabled) {
+      const bounds = calculateOverlayBounds(
+        detectionResult.frameWidth,
+        detectionResult.frameHeight,
+        viewDimensions.width,
+        viewDimensions.height,
+        1.586, // CIN aspect ratio
+        40     // padding
+      );
+      setOverlayBounds(bounds);
+      setOverlayEnabled(true);
+      console.log('Overlay bounds calculated:', bounds);
+    }
+  }, [detectionResult?.frameWidth, detectionResult?.frameHeight, viewDimensions, overlayEnabled]);
 
   /**
    * Request camera permission on mount
@@ -189,7 +218,17 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
         orientation="portrait"
       />
       
-      {/* Detection Overlay - Shows when card detected */}
+      {/* Fixed Guide Frame Overlay */}
+      <CardGuideFrame
+        viewWidth={viewDimensions.width}
+        viewHeight={viewDimensions.height}
+        aspectRatio={1.586}
+        padding={40}
+        showValidation={(detectionResult?.debug?.candidateQuads ?? 0) > 0 || detectionResult?.isValid === true}
+        isAligned={detectionResult?.isValid || false}
+      />
+      
+      {/* Detection Overlay - Shows detected card corners when valid */}
       {detectionResult?.isValid && detectionResult.corners.length === 4 && (
         <CardOverlay
           corners={detectionResult.corners}
@@ -203,7 +242,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
         />
       )}
       
-      {/* Instructions */}
+      {/* Instructions removed - now shown by CardGuideFrame */}
       <View style={styles.instructionsContainer}>
         <Text style={styles.instructionsText}>
           Position your ID card within the camera view

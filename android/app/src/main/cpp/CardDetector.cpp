@@ -90,8 +90,31 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
     LOGD("detectCard: orig %dx%d → proc %dx%d  scale=%.3f  hasCr=%d",
          origW, origH, W, H, scale, procCr.empty() ? 0 : 1);
 
+    // ── Stage 0: Overlay-Guided ROI Extraction (NEW) ──
+    cv::Mat detectionFrame = procFrame;
+    cv::Mat detectionCr = procCr;
+    cv::Rect roiRect(0, 0, W, H);  // Default: full frame
+    cv::Point roiOffset(0, 0);
+    
+    if (config_.overlay.enabled && config_.useROICropping) {
+        detectionFrame = extractOverlayROI(procFrame, config_.overlay, roiRect);
+        roiOffset = roiRect.tl();  // Top-left corner offset
+        
+        // Crop Cr channel to same ROI
+        if (!procCr.empty()) {
+            detectionCr = procCr(roiRect).clone();
+        }
+        
+        LOGD("Stage0-Overlay: ROI extracted [%d,%d %dx%d]",
+             roiRect.x, roiRect.y, roiRect.width, roiRect.height);
+    }
+    
+    const int detW = detectionFrame.cols;
+    const int detH = detectionFrame.rows;
+    const double detectionArea = static_cast<double>(detW) * detH;
+
     // Stage 1
-    cv::Mat edges = preprocessFrame(procFrame);
+    cv::Mat edges = preprocessFrame(detectionFrame);
 
     if (config_.debugMode) {
         result.debug.edgeWhitePixels = cv::countNonZero(edges);
@@ -106,7 +129,7 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
 
     if (!contours.empty()) {
         double largestArea = cv::contourArea(contours[0]);
-        result.debug.largestContourAreaRatio = static_cast<float>(largestArea / imageArea);
+        result.debug.largestContourAreaRatio = static_cast<float>(largestArea / detectionArea);
         LOGD("Stage2: largest ratio=%.4f", result.debug.largestContourAreaRatio);
     }
 
@@ -121,7 +144,7 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
     }
 
     // Stage 3
-    auto candidates = rankContours(contours, imageArea, W, H, cannyEdges_, &result.debug);
+    auto candidates = rankContours(contours, detectionArea, detW, detH, cannyEdges_, &result.debug);
     result.debug.candidateQuads = static_cast<int>(candidates.size());
     LOGD("Stage3: candidateQuads=%d", result.debug.candidateQuads);
 
@@ -143,13 +166,18 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
          best.score, best.areaRatio, best.aspectRatio, best.rectangularity);
 
     // Stage 5 – geometric floor check (area in range, geometry score above floor)
-    bool geomOk = (best.score   >= config_.minGeometryScore &&
-                   best.areaRatio >= config_.minAreaRatio &&
-                   best.areaRatio <= config_.maxAreaRatio);
+    // When overlay+ROI is active, the card legitimately fills most of the ROI,
+    // so we only check the minimum area and geometry score — Stage 5d handles upper bound.
+    const bool overlayROIActive = config_.overlay.enabled && config_.useROICropping;
+    const float effectiveMaxArea = overlayROIActive ? 1.0f : config_.maxAreaRatio;
+
+    bool geomOk = (best.score      >= config_.minGeometryScore &&
+                   best.areaRatio  >= config_.minAreaRatio &&
+                   best.areaRatio  <= effectiveMaxArea);
 
     if (!geomOk) {
-        LOGD("Stage5: REJECTED geometry  score=%.3f areaRatio=%.3f (minGeo=%.2f)",
-             best.score, best.areaRatio, config_.minGeometryScore);
+        LOGD("Stage5: REJECTED geometry  score=%.3f areaRatio=%.3f (min=%.3f max=%.3f minGeo=%.2f)",
+             best.score, best.areaRatio, config_.minAreaRatio, effectiveMaxArea, config_.minGeometryScore);
         if (static_cast<int>(temporalBuf_.size()) < config_.temporalBufferSize)
             temporalBuf_.resize(config_.temporalBufferSize);
         temporalBuf_[temporalIdx_ % config_.temporalBufferSize].isValid = false;
@@ -157,16 +185,68 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
         lastResult_ = result;
         return result;
     }
-    LOGD("Stage5: geometry OK (score=%.3f)", best.score);
+    LOGD("Stage5: geometry OK (score=%.3f areaRatio=%.3f overlayROI=%d)",
+         best.score, best.areaRatio, overlayROIActive ? 1 : 0);
 
-    // Border contrast score (computed here using gray procFrame)
-    float borderScore = calcBorderContrast(best.quad, procFrame);
-    LOGD("Stage5b: borderScore=%.3f", borderScore);
+    // Stage 5b – Physical plausibility: reject excessively large quads (PC screens, desks)
+    if (config_.overlay.enabled) {
+        // Overlay mode: reject if quad is > 2.5x the overlay area (screen/desk fills frame)
+        float overlayArea = config_.overlay.width * config_.overlay.height;
+        float relToOverlay = (overlayArea > 0.f) ? (best.areaRatio / overlayArea) : 999.f;
+        if (relToOverlay > 2.5f) {
+            LOGD("Stage5b: REJECTED overlay-relative scale — %.2fx overlay area (screen/desk)",
+                 relToOverlay);
+            if (static_cast<int>(temporalBuf_.size()) < config_.temporalBufferSize)
+                temporalBuf_.resize(config_.temporalBufferSize);
+            temporalBuf_[temporalIdx_ % config_.temporalBufferSize].isValid = false;
+            temporalIdx_++;
+            lastResult_ = result;
+            return result;
+        }
+        LOGD("Stage5b: overlay-relative scale OK (%.2fx overlay)", relToOverlay);
+    } else if (best.areaRatio > 0.20f) {
+        LOGD("Stage5b: REJECTED physical scale — areaRatio=%.3f > 0.20 (screen/desk)",
+             best.areaRatio);
+        if (static_cast<int>(temporalBuf_.size()) < config_.temporalBufferSize)
+            temporalBuf_.resize(config_.temporalBufferSize);
+        temporalBuf_[temporalIdx_ % config_.temporalBufferSize].isValid = false;
+        temporalIdx_++;
+        lastResult_ = result;
+        return result;
+    }
+
+    // Stage 5d – Overlay Constraints: area closeness, center alignment, overlap (NEW)
+    if (config_.overlay.enabled) {
+        // Offset quad back to full frame coordinates if ROI was used
+        std::vector<cv::Point> fullFrameQuad = best.quad;
+        if (config_.useROICropping && roiRect.area() > 0) {
+            for (auto& pt : fullFrameQuad) {
+                pt.x += roiOffset.x;
+                pt.y += roiOffset.y;
+            }
+        }
+        
+        bool overlayOk = validateOverlayConstraints(fullFrameQuad, W, H, config_.overlay);
+        if (!overlayOk) {
+            LOGD("Stage5d: REJECTED overlay constraints (area/center/overlap)");
+            if (static_cast<int>(temporalBuf_.size()) < config_.temporalBufferSize)
+                temporalBuf_.resize(config_.temporalBufferSize);
+            temporalBuf_[temporalIdx_ % config_.temporalBufferSize].isValid = false;
+            temporalIdx_++;
+            lastResult_ = result;
+            return result;
+        }
+        LOGD("Stage5d: overlay constraints PASSED");
+    }
+
+    // Border contrast score (computed here using gray detectionFrame)
+    float borderScore = calcBorderContrast(best.quad, detectionFrame);
+    LOGD("Stage5c: borderScore=%.3f", borderScore);
 
     // Stage 6 – red corner validation
     float redScore = 0.f;
-    if (config_.redValidationEnabled && !procCr.empty()) {
-        redScore = validateRedCorners(best.quad, procCr, procFrame, W, H);
+    if (config_.redValidationEnabled && !detectionCr.empty()) {
+        redScore = validateRedCorners(best.quad, detectionCr, detectionFrame, detW, detH);
         result.debug.redScore     = redScore;
         result.debug.redValidated = (redScore > 0.f);
         LOGD("Stage6: redScore=%.3f  validated=%d", redScore, result.debug.redValidated ? 1 : 0);
@@ -179,7 +259,7 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
             lastResult_ = result;
             return result;
         }
-    } else if (config_.redValidationEnabled && procCr.empty()) {
+    } else if (config_.redValidationEnabled && detectionCr.empty()) {
         LOGD("Stage6: SKIPPED (no Cr mat)");
     }
 
@@ -201,6 +281,16 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
 
     // Build validated result (corners in original frame coordinates)
     auto corners = sortCorners(best.quad);
+    
+    // Apply ROI offset if ROI cropping was used
+    if (config_.overlay.enabled && config_.useROICropping && roiRect.area() > 0) {
+        for (auto& c : corners) {
+            c.x += roiOffset.x;
+            c.y += roiOffset.y;
+        }
+    }
+    
+    // Scale back to original frame coordinates
     if (scale != 1.f) {
         float inv = 1.f / scale;
         for (auto& c : corners) { c.x *= inv; c.y *= inv; }
@@ -705,6 +795,17 @@ float CardDetector::validateRedCorners(
 {
     if (quad.size() != 4 || crMat.empty()) return 0.f;
 
+    // ── Adaptive red threshold only (luminance-based) ──
+    // Only redRatio minimum is adapted. Compactness & uniqueness are structural
+    // (geometry-based) and must NOT be loosened for dark scenes.
+    double meanLuma = grayMat.empty() ? 128.0 : cv::mean(grayMat)[0];
+    double t = std::max(0.0, std::min(1.0, (meanLuma - 40.0) / 80.0));
+    float adaptMinRed = static_cast<float>(0.06 + t * (0.15 - 0.06)); // 0.06 → 0.15
+    // Y threshold for "white": softer in dark scenes
+    int adaptWhiteY = static_cast<int>(90.0 + t * (config_.redWhiteYThreshold - 90.0));
+    LOGD("  RedAdapt: meanLuma=%.1f t=%.2f adaptMinRed=%.3f whiteY=%d",
+         meanLuma, t, adaptMinRed, adaptWhiteY);
+
     auto sortedPts = sortCorners(quad);
 
     float qW = std::max({std::abs(sortedPts[1].x - sortedPts[0].x),
@@ -712,16 +813,18 @@ float CardDetector::validateRedCorners(
     float qH = std::max({std::abs(sortedPts[3].y - sortedPts[0].y),
                          std::abs(sortedPts[2].y - sortedPts[1].y), 1.f});
 
-    int zoneW = std::max(6, static_cast<int>(qW * config_.redCornerZoneW));
-    int zoneH = std::max(6, static_cast<int>(qH * config_.redCornerZoneH));
+    int zoneW = std::max(8, static_cast<int>(qW * config_.redCornerZoneW));
+    int zoneH = std::max(8, static_cast<int>(qH * config_.redCornerZoneH));
 
-    float bestScore = 0.f;
+    // Per-corner scores. We need EXACTLY 1 strong red corner (CIN flag).
+    // PC screens have red/orange in 2-4 corners simultaneously.
+    int   validCorners = 0;
+    float bestScore    = 0.f;
 
     for (int ci = 0; ci < 4; ci++) {
         int cx = static_cast<int>(sortedPts[ci].x);
         int cy = static_cast<int>(sortedPts[ci].y);
 
-        // Each corner extends INWARD toward the card center:
         int x0, y0;
         switch (ci) {
             case 0: x0 = cx;         y0 = cy;         break; // TL
@@ -740,52 +843,72 @@ float CardDetector::validateRedCorners(
         int total = zoneCr.rows * zoneCr.cols;
         if (total == 0) continue;
 
-        // --- Condition 1: red ratio (Cr channel) ---
+        // --- Condition 1: redRatio (adaptive) ---
         cv::Mat redMask;
         cv::threshold(zoneCr, redMask, config_.redCrThreshold, 255, cv::THRESH_BINARY);
         int cntRed = cv::countNonZero(redMask);
         float redRatio = static_cast<float>(cntRed) / total;
 
-        // --- Condition 2: white ratio (Y/gray channel) ---
+        // --- Condition 2: compactness of the red blob ---
+        // CIN flag = filled rectangle → compactness 0.55-0.95
+        // PC wallpaper = scattered pixels → compactness 0.05-0.25
+        float compactness = 0.f;
+        float bboxFill    = 0.f;
+        if (cntRed > 4) {
+            cv::Rect bbox = cv::boundingRect(redMask);
+            if (bbox.area() > 0) {
+                compactness = static_cast<float>(cntRed) / bbox.area();
+                bboxFill    = static_cast<float>(bbox.area()) / total;
+            }
+        }
+
+        // --- Condition 3: white adjacent area (adaptive) ---
         float whiteRatio = 0.f;
-        if (!grayMat.empty() && roi.x + roi.width <= grayMat.cols &&
-                                 roi.y + roi.height <= grayMat.rows) {
+        if (!grayMat.empty() && x1 <= grayMat.cols && y1 <= grayMat.rows) {
             cv::Mat zoneGray = grayMat(roi);
             cv::Mat whiteMask;
-            cv::threshold(zoneGray, whiteMask, config_.redWhiteYThreshold, 255, cv::THRESH_BINARY);
-            int cntWhite = cv::countNonZero(whiteMask);
-            whiteRatio = static_cast<float>(cntWhite) / total;
+            cv::threshold(zoneGray, whiteMask, adaptWhiteY, 255, cv::THRESH_BINARY);
+            whiteRatio = static_cast<float>(cv::countNonZero(whiteMask)) / total;
         }
 
-        // --- Condition 3: compact red cluster ---
-        float clusterRatio = 0.f;
-        if (cntRed > 0) {
-            std::vector<std::vector<cv::Point>> redContours;
-            cv::findContours(redMask.clone(), redContours,
-                             cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-            double maxA = 0;
-            for (auto& rc : redContours) maxA = std::max(maxA, cv::contourArea(rc));
-            clusterRatio = static_cast<float>(maxA) / total;
-        }
+        LOGD("  RedCorner[%d] zone(%d,%d %dx%d) red=%.3f compact=%.3f bboxFill=%.3f white=%.3f",
+             ci, x0, y0, x1-x0, y1-y0, redRatio, compactness, bboxFill, whiteRatio);
 
-        LOGD("  RedCorner[%d] zone(%d,%d %dx%d) red=%.3f white=%.3f cluster=%.3f",
-             ci, x0, y0, x1-x0, y1-y0, redRatio, whiteRatio, clusterRatio);
+        // Structural conditions (not adapted to luminance — must be robust):
+        //   redRatio >= adaptMinRed     (enough red, adapted to light level)
+        //   compactness >= 0.45         (red forms a solid block, not scattered)
+        //   bboxFill >= 0.12            (bbox covers meaningful part of zone)
+        bool cornerValid = (redRatio   >= adaptMinRed) &&
+                           (compactness >= 0.45f)       &&
+                           (bboxFill    >= 0.12f);
 
-        // All 3 conditions must pass
-        if (redRatio      >= config_.redMinRatio        &&
-            whiteRatio    >= config_.redWhiteMinRatio   &&
-            clusterRatio  >= config_.redClusterMinRatio) {
-            float cornerScore = (redRatio >= 0.08f) ? 1.0f : 0.8f;
-            bestScore = std::max(bestScore, cornerScore);
-            LOGD("  RedCorner[%d]: VALID score=%.2f", ci, cornerScore);
+        // Additionally require white adjacent for bright scenes
+        if (t > 0.4f)
+            cornerValid = cornerValid && (whiteRatio >= 0.08f);
+
+        if (cornerValid) {
+            validCorners++;
+            float score = (redRatio >= 0.15f) ? 1.0f : 0.8f;
+            bestScore = std::max(bestScore, score);
+            LOGD("  RedCorner[%d]: VALID score=%.2f", ci, score);
         }
     }
 
-    if (bestScore == 0.f) {
-        LOGD("  RedCorner: REJECTED — no corner passed all 3 checks");
-    } else {
-        LOGD("  RedCorner: CONFIRMED (bestScore=%.2f)", bestScore);
+    // ── Uniqueness check — CIN has exactly 1 red corner. ──
+    // PC screens / wallpapers with red spread across the image will have 2-4
+    // corners passing the per-corner test → reject them here.
+    if (validCorners == 0) {
+        LOGD("  RedCorner: REJECTED — no corner passed structural checks");
+        return 0.f;
     }
+    if (validCorners >= 3) {
+        LOGD("  RedCorner: REJECTED — %d corners valid (PC screen / wallpaper, expected 1)",
+             validCorners);
+        return 0.f;
+    }
+    // 1 or 2 valid corners accepted (2 can happen when card is nearly centred
+    // and two adjacent corners share part of the flag zone)
+    LOGD("  RedCorner: CONFIRMED validCorners=%d bestScore=%.2f", validCorners, bestScore);
     return bestScore;
 }
 
@@ -967,6 +1090,128 @@ std::array<Point2D, 4> CardDetector::sortCorners(const std::vector<cv::Point>& q
     corners[2] = Point2D(static_cast<float>(quad[br].x), static_cast<float>(quad[br].y));
     corners[3] = Point2D(static_cast<float>(quad[bl].x), static_cast<float>(quad[bl].y));
     return corners;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Overlay-Guided Detection Helpers (NEW)
+// ──────────────────────────────────────────────────────────────────────────────
+
+cv::Mat CardDetector::extractOverlayROI(
+    const cv::Mat& frame, 
+    const OverlayBounds& overlay,
+    cv::Rect& roiRect)
+{
+    const int W = frame.cols;
+    const int H = frame.rows;
+    
+    // Convert normalized bounds to pixel coordinates
+    int x = static_cast<int>(overlay.x * W);
+    int y = static_cast<int>(overlay.y * H);
+    int w = static_cast<int>(overlay.width * W);
+    int h = static_cast<int>(overlay.height * H);
+    
+    // Clamp to frame boundaries
+    x = std::max(0, std::min(x, W - 1));
+    y = std::max(0, std::min(y, H - 1));
+    w = std::max(1, std::min(w, W - x));
+    h = std::max(1, std::min(h, H - y));
+    
+    roiRect = cv::Rect(x, y, w, h);
+    
+    LOGD("extractOverlayROI: normalized[%.3f,%.3f %.3fx%.3f] → pixels[%d,%d %dx%d]",
+         overlay.x, overlay.y, overlay.width, overlay.height, x, y, w, h);
+    
+    return frame(roiRect).clone();
+}
+
+bool CardDetector::validateOverlayConstraints(
+    const std::vector<cv::Point>& quad,
+    int imgW, int imgH,
+    const OverlayBounds& overlay)
+{
+    if (quad.size() != 4) return false;
+    
+    // Convert overlay to pixel rect
+    int ovX = static_cast<int>(overlay.x * imgW);
+    int ovY = static_cast<int>(overlay.y * imgH);
+    int ovW = static_cast<int>(overlay.width * imgW);
+    int ovH = static_cast<int>(overlay.height * imgH);
+    float overlayArea = static_cast<float>(ovW * ovH);
+    float overlayCx = ovX + ovW / 2.0f;
+    float overlayCy = ovY + ovH / 2.0f;
+    float overlayDiag = std::sqrt(static_cast<float>(ovW * ovW + ovH * ovH));
+    
+    // 1. Area Closeness Constraint
+    float quadArea = static_cast<float>(cv::contourArea(quad));
+    float areaRatio = quadArea / overlayArea;
+    
+    if (areaRatio < overlay.areaToleranceLow || areaRatio > overlay.areaToleranceHigh) {
+        LOGD("validateOverlay: FAILED area closeness (ratio=%.3f, range=[%.2f,%.2f])",
+             areaRatio, overlay.areaToleranceLow, overlay.areaToleranceHigh);
+        return false;
+    }
+    LOGD("validateOverlay: area closeness PASSED (ratio=%.3f)", areaRatio);
+    
+    // 2. Center Alignment Constraint
+    float quadCx = 0, quadCy = 0;
+    for (const auto& p : quad) {
+        quadCx += p.x;
+        quadCy += p.y;
+    }
+    quadCx /= 4.0f;
+    quadCy /= 4.0f;
+    
+    float centerDist = std::sqrt((quadCx - overlayCx) * (quadCx - overlayCx) +
+                                  (quadCy - overlayCy) * (quadCy - overlayCy));
+    float maxCenterDist = overlayDiag * overlay.centerToleranceRatio;
+    
+    if (centerDist > maxCenterDist) {
+        LOGD("validateOverlay: FAILED center alignment (dist=%.1f > max=%.1f)",
+             centerDist, maxCenterDist);
+        return false;
+    }
+    LOGD("validateOverlay: center alignment PASSED (dist=%.1f)", centerDist);
+    
+    // 3. Overlap Constraint
+    float overlapRatio = computeQuadOverlayOverlap(quad, imgW, imgH, overlay);
+    if (overlapRatio < overlay.overlapMinRatio) {
+        LOGD("validateOverlay: FAILED overlap (ratio=%.3f < min=%.2f)",
+             overlapRatio, overlay.overlapMinRatio);
+        return false;
+    }
+    LOGD("validateOverlay: overlap PASSED (ratio=%.3f)", overlapRatio);
+    
+    return true;
+}
+
+float CardDetector::computeQuadOverlayOverlap(
+    const std::vector<cv::Point>& quad,
+    int imgW, int imgH,
+    const OverlayBounds& overlay)
+{
+    if (quad.size() != 4) return 0.f;
+    
+    // Convert overlay to pixel rect
+    cv::Rect overlayRect(
+        static_cast<int>(overlay.x * imgW),
+        static_cast<int>(overlay.y * imgH),
+        static_cast<int>(overlay.width * imgW),
+        static_cast<int>(overlay.height * imgH)
+    );
+    
+    // Get bounding rect of quad
+    cv::Rect quadBoundingRect = cv::boundingRect(quad);
+    
+    // Compute intersection
+    cv::Rect intersection = quadBoundingRect & overlayRect;
+    
+    if (intersection.area() == 0) return 0.f;
+    
+    // Compute overlap as intersection / quad area (approximation using bounding box)
+    float overlapRatio = static_cast<float>(intersection.area()) / 
+                         static_cast<float>(quadBoundingRect.area());
+    
+    return overlapRatio;
 }
 
 } // namespace CardDetection

@@ -38,6 +38,24 @@ struct Point2D {
 };
 
 /**
+ * Overlay bounds for guided detection (normalized 0-1)
+ * When enabled, detection validates quads against this fixed frame
+ */
+struct OverlayBounds {
+    bool  enabled = false;   // Enable overlay-guided detection
+    float x       = 0.f;     // Normalized 0-1 (left edge)
+    float y       = 0.f;     // Normalized 0-1 (top edge)
+    float width   = 0.f;     // Normalized 0-1
+    float height  = 0.f;     // Normalized 0-1
+    
+    // Validation tolerances
+    float areaToleranceLow  = 0.20f;  // Quad must be >= 20% of overlay area
+    float areaToleranceHigh = 2.50f;  // Quad must be <= 250% of overlay area
+    float centerToleranceRatio = 0.50f; // Max distance from overlay center (50% of diagonal)
+    float overlapMinRatio = 0.30f;    // Quad must overlap >= 30% with overlay
+};
+
+/**
  * Intermediate candidate produced by Stage 3
  */
 struct ContourCandidate {
@@ -93,6 +111,10 @@ struct CardDetectionResult {
 // ──────────────────────────────────────────────
 
 struct DetectionConfig {
+    // --- Stage 0: Overlay-Guided Detection (NEW) ---
+    OverlayBounds overlay;               // Fixed guide frame bounds (optional)
+    bool useROICropping = true;          // Crop frame to overlay ROI before detection
+    
     // --- Stage 1: preprocessing ---
     // CLAHE: local contrast enhancement (critical for card on light desk)
     double claheClipLimit    = 2.0;   // higher = more contrast boost
@@ -109,10 +131,11 @@ struct DetectionConfig {
     int topN                   = 8;
 
     // --- Stage 3: geometric filter ---
-    float minAreaRatio         = 0.015f; // lowered: card on light bg has fragmented contour
-    float maxAreaRatio         = 0.85f;  // card very close to camera
+    float minAreaRatio         = 0.010f; // 1.0% min (card far from camera or on cluttered bg)
+    float maxAreaRatio         = 0.20f;  // PHYSICAL CONSTRAINT: handheld CIN never exceeds 20% of frame
+                                         // (screens/desks covering 30-40% → rejected)
     float targetAspectRatio    = 1.586f; // ID-1 standard (85.6 x 54 mm)
-    float aspectRatioTolerance = 0.28f;  // ±28% → range 1.14-2.03 (handles hand occlusion + perspective)
+    float aspectRatioTolerance = 0.35f;  // ±35% → range 1.03-2.14 (handles tilted card + keyboard perspective)
     float edgeDensityThreshold = 0.20f;  // 2nd-worst side must have ≥20% real edges
 
     // --- Stage 4: scoring weights ---
@@ -137,13 +160,13 @@ struct DetectionConfig {
     float redMinRatio            = 0.015f;// ≥1.5% of corner zone must be red (lowered for dim light)
     int   redWhiteYThreshold     = 180;   // Y > 180 → white pixel
     float redWhiteMinRatio       = 0.25f; // ≥25% of zone must be white (card background)
-    float redClusterMinRatio     = 0.02f; // largest red contour ≥2% of zone (compact flag)
+    float redClusterMinRatio     = 0.06f; // largest red contour ≥6% of zone (compact flag — blocks scattered PC icons)
     float redCornerZoneW         = 0.18f; // 18% of quad width per corner zone
     float redCornerZoneH         = 0.25f; // 25% of quad height per corner zone
 
     // --- Stage 7: temporal buffer ---
     int temporalBufferSize     = 5;     // keep last N frames
-    int temporalMinValid       = 3;     // need M/N valid to confirm
+    int temporalMinValid       = 2;     // need M/N valid to confirm
 
     // --- Debug ---
     bool debugMode             = true;
@@ -232,6 +255,20 @@ private:
                               int imgW, int imgH);
     std::array<Point2D, 4> sortCorners(const std::vector<cv::Point>& quad);
     float  ptDist(const cv::Point& a, const cv::Point& b);
+    
+    // --- Overlay-Guided Detection (NEW) ---
+    /** Check if quad satisfies overlay constraints (area, center, overlap) */
+    bool   validateOverlayConstraints(const std::vector<cv::Point>& quad,
+                                       int imgW, int imgH,
+                                       const OverlayBounds& overlay);
+    /** Compute IoU (Intersection over Union) between quad and overlay rect */
+    float  computeQuadOverlayOverlap(const std::vector<cv::Point>& quad,
+                                      int imgW, int imgH,
+                                      const OverlayBounds& overlay);
+    /** Extract ROI from frame based on overlay bounds */
+    cv::Mat extractOverlayROI(const cv::Mat& frame, 
+                              const OverlayBounds& overlay,
+                              cv::Rect& roiRect);
 };
 
 } // namespace CardDetection

@@ -29,6 +29,20 @@ interface UseCardDetectionOptions {
   
   /** Throttle detection updates (ms) */
   throttleMs?: number;
+  
+  /** Overlay-guided detection bounds (normalized 0-1) */
+  overlayBounds?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
+  
+  /** Enable overlay-guided detection */
+  useOverlay?: boolean;
+  
+  /** Use ROI cropping when overlay is enabled */
+  useROICropping?: boolean;
 }
 
 /**
@@ -65,6 +79,9 @@ export function useCardDetection(
     config,
     onCardDetected,
     throttleMs = 100,
+    overlayBounds = null,
+    useOverlay = false,
+    useROICropping = true,
   } = options;
 
   // State
@@ -114,6 +131,17 @@ export function useCardDetection(
       cardDetectorModule.setConfig(config ?? {}).catch(console.error);
     }
   }, [config, isReady]);
+
+  /**
+   * Update overlay bounds when they change
+   */
+  useEffect(() => {
+    if (isReady) {
+      cardDetectorModule
+        .setOverlay(useOverlay, overlayBounds, useROICropping)
+        .catch(console.error);
+    }
+  }, [isReady, useOverlay, overlayBounds, useROICropping]);
 
   /**
    * Handle detection result from worklet

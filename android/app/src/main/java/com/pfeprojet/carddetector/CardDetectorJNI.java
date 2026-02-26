@@ -47,6 +47,25 @@ public class CardDetectorJNI {
     );
     
     /**
+     * Set overlay-guided detection bounds
+     * 
+     * @param enabled Enable overlay-guided detection
+     * @param x Normalized X coordinate (0-1)
+     * @param y Normalized Y coordinate (0-1)
+     * @param width Normalized width (0-1)
+     * @param height Normalized height (0-1)
+     * @param useROICropping Crop frame to ROI before detection
+     */
+    public static native void nativeSetOverlay(
+        boolean enabled,
+        float x,
+        float y,
+        float width,
+        float height,
+        boolean useROICropping
+    );
+    
+    /**
      * Detect card from YUV frame data
      * Optimized for camera frames
      *

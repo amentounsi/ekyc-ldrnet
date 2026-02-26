@@ -93,6 +93,28 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeSetConfig(
     LOGI("config updated");
 }
 
+JNIEXPORT void JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeSetOverlay(
+    JNIEnv*, jclass,
+    jboolean enabled,
+    jfloat x, jfloat y, jfloat width, jfloat height,
+    jboolean useROICropping)
+{
+    if (!g_detector) { LOGE("not initialised"); return; }
+
+    CardDetection::DetectionConfig cfg = g_detector->getConfig();
+    cfg.overlay.enabled = enabled;
+    cfg.overlay.x = x;
+    cfg.overlay.y = y;
+    cfg.overlay.width = width;
+    cfg.overlay.height = height;
+    cfg.useROICropping = useROICropping;
+    
+    g_detector->setConfig(cfg);
+    LOGI("overlay config: enabled=%d [%.3f,%.3f %.3fx%.3f] useROI=%d",
+         enabled, x, y, width, height, useROICropping);
+}
+
 // ── Detect from YUV (VisionCamera path) ──
 
 JNIEXPORT jfloatArray JNICALL

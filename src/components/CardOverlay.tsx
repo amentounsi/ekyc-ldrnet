@@ -183,7 +183,92 @@ const styles = StyleSheet.create({
   svg: {
     flex: 1,
   },
+  instructionContainer: {
+    position: 'absolute',
+    alignSelf: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 8,
+  },
+  instructionText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
 });
+
+/**
+ * Overlay bounds for native detector (relative to frame coordinates)
+ */
+export interface OverlayBounds {
+  x: number;         // Normalized 0-1 (left)
+  y: number;         // Normalized 0-1 (top)
+  width: number;     // Normalized 0-1
+  height: number;    // Normalized 0-1
+}
+
+/**
+ * Calculate overlay bounds for a given frame and view dimensions
+ */
+export function calculateOverlayBounds(
+  frameWidth: number,
+  frameHeight: number,
+  viewWidth: number,
+  viewHeight: number,
+  aspectRatio: number = 1.586,
+  padding: number = 40
+): OverlayBounds {
+  // Camera uses ResizeMode "cover" (object-fit: cover):
+  // the frame is uniformly scaled so that BOTH dimensions >= view dimensions,
+  // then centered and cropped. We must account for this to get correct frame coords.
+  //
+  // uniformDisplayScale = max(viewWidth/frameWidth, viewHeight/frameHeight)
+  // offsets = how many frame pixels are cropped on each side
+  const displayScaleX = viewWidth / frameWidth;
+  const displayScaleY = viewHeight / frameHeight;
+  const uniformDisplayScale = Math.max(displayScaleX, displayScaleY);
+
+  // Visible frame region (in frame pixels)
+  const visibleFrameW = viewWidth  / uniformDisplayScale;
+  const visibleFrameH = viewHeight / uniformDisplayScale;
+  const cropOffsetX   = (frameWidth  - visibleFrameW) / 2;
+  const cropOffsetY   = (frameHeight - visibleFrameH) / 2;
+
+  // Guide frame dimensions in view (screen) coordinates
+  const availableWidth  = viewWidth  - padding * 2;
+  const availableHeight = viewHeight - padding * 2;
+
+  let guideWidth: number;
+  let guideHeight: number;
+
+  if (availableWidth / availableHeight > aspectRatio) {
+    guideHeight = availableHeight * 0.60;
+    guideWidth  = guideHeight * aspectRatio;
+  } else {
+    guideWidth  = availableWidth * 0.70;
+    guideHeight = guideWidth / aspectRatio;
+  }
+
+  // Guide top-left in view coordinates (centered)
+  const guideViewX = (viewWidth  - guideWidth)  / 2;
+  const guideViewY = (viewHeight - guideHeight) / 2;
+
+  // Convert view coords → frame coords using uniform scale + crop offset
+  const frameX = cropOffsetX + guideViewX  / uniformDisplayScale;
+  const frameY = cropOffsetY + guideViewY  / uniformDisplayScale;
+  const frameW = guideWidth  / uniformDisplayScale;
+  const frameH = guideHeight / uniformDisplayScale;
+
+  // Normalize to 0-1 relative to full frame dimensions
+  return {
+    x:      frameX / frameWidth,
+    y:      frameY / frameHeight,
+    width:  frameW / frameWidth,
+    height: frameH / frameHeight,
+  };
+}
 
 /**
  * Static guide frame component
@@ -194,6 +279,8 @@ interface CardGuideFrameProps {
   viewHeight: number;
   aspectRatio?: number; // ID-1 card ratio 1.586
   padding?: number;
+  showValidation?: boolean;
+  isAligned?: boolean;
 }
 
 export const CardGuideFrame: React.FC<CardGuideFrameProps> = ({
@@ -201,29 +288,33 @@ export const CardGuideFrame: React.FC<CardGuideFrameProps> = ({
   viewHeight,
   aspectRatio = 1.586,
   padding = 40,
+  showValidation = false,
+  isAligned = false,
 }) => {
-  // Calculate guide frame dimensions
+  // Calculate guide frame dimensions (60-70% of available space)
   const availableWidth = viewWidth - padding * 2;
   const availableHeight = viewHeight - padding * 2;
 
   let frameWidth: number;
   let frameHeight: number;
 
-  // Size frame to fit within available space while maintaining aspect ratio
   if (availableWidth / availableHeight > aspectRatio) {
-    // Height constrained
-    frameHeight = availableHeight * 0.45;
+    frameHeight = availableHeight * 0.60;
     frameWidth = frameHeight * aspectRatio;
   } else {
-    // Width constrained
-    frameWidth = availableWidth * 0.85;
+    frameWidth = availableWidth * 0.70;
     frameHeight = frameWidth / aspectRatio;
   }
 
   const x = (viewWidth - frameWidth) / 2;
   const y = (viewHeight - frameHeight) / 2;
-  const cornerLength = 30;
+  const cornerLength = 35;
   const strokeWidth = 4;
+  
+  // Dynamic color based on alignment status
+  const frameColor = showValidation
+    ? (isAligned ? '#00FF00' : '#FFD700')  // Green if aligned, Yellow if not
+    : '#FFFFFF';  // White by default
 
   return (
     <View style={styles.container} pointerEvents="none">
@@ -234,63 +325,76 @@ export const CardGuideFrame: React.FC<CardGuideFrameProps> = ({
           y={0}
           width={viewWidth}
           height={y}
-          fill="rgba(0,0,0,0.5)"
+          fill="rgba(0,0,0,0.6)"
         />
         <Rect
           x={0}
           y={y + frameHeight}
           width={viewWidth}
           height={viewHeight - y - frameHeight}
-          fill="rgba(0,0,0,0.5)"
+          fill="rgba(0,0,0,0.6)"
         />
         <Rect
           x={0}
           y={y}
           width={x}
           height={frameHeight}
-          fill="rgba(0,0,0,0.5)"
+          fill="rgba(0,0,0,0.6)"
         />
         <Rect
           x={x + frameWidth}
           y={y}
           width={viewWidth - x - frameWidth}
           height={frameHeight}
-          fill="rgba(0,0,0,0.5)"
+          fill="rgba(0,0,0,0.6)"
         />
 
         {/* Corner brackets - Top Left */}
         <Path
           d={`M ${x} ${y + cornerLength} L ${x} ${y} L ${x + cornerLength} ${y}`}
-          stroke="#FFFFFF"
+          stroke={frameColor}
           strokeWidth={strokeWidth}
           fill="none"
           strokeLinecap="round"
+          strokeLinejoin="round"
         />
         {/* Top Right */}
         <Path
           d={`M ${x + frameWidth - cornerLength} ${y} L ${x + frameWidth} ${y} L ${x + frameWidth} ${y + cornerLength}`}
-          stroke="#FFFFFF"
+          stroke={frameColor}
           strokeWidth={strokeWidth}
           fill="none"
           strokeLinecap="round"
+          strokeLinejoin="round"
         />
         {/* Bottom Right */}
         <Path
           d={`M ${x + frameWidth} ${y + frameHeight - cornerLength} L ${x + frameWidth} ${y + frameHeight} L ${x + frameWidth - cornerLength} ${y + frameHeight}`}
-          stroke="#FFFFFF"
+          stroke={frameColor}
           strokeWidth={strokeWidth}
           fill="none"
           strokeLinecap="round"
+          strokeLinejoin="round"
         />
         {/* Bottom Left */}
         <Path
           d={`M ${x + cornerLength} ${y + frameHeight} L ${x} ${y + frameHeight} L ${x} ${y + frameHeight - cornerLength}`}
-          stroke="#FFFFFF"
+          stroke={frameColor}
           strokeWidth={strokeWidth}
           fill="none"
           strokeLinecap="round"
+          strokeLinejoin="round"
         />
       </Svg>
+      
+      {/* Instruction text */}
+      <View style={[styles.instructionContainer, { top: y - 60 }]}>
+        <Text style={styles.instructionText}>
+          {showValidation
+            ? (isAligned ? '✓ Card Aligned' : 'Align card within frame')
+            : 'Position your CIN card inside the frame'}
+        </Text>
+      </View>
     </View>
   );
 };

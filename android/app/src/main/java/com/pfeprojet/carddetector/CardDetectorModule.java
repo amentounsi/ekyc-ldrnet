@@ -102,6 +102,40 @@ public class CardDetectorModule extends ReactContextBaseJavaModule {
     }
     
     /**
+     * Set overlay-guided detection bounds
+     */
+    @ReactMethod
+    public void setOverlay(
+        boolean enabled,
+        double x,
+        double y,
+        double width,
+        double height,
+        boolean useROICropping,
+        Promise promise
+    ) {
+        try {
+            if (!isInitialized) {
+                promise.reject("NOT_INITIALIZED", "CardDetector not initialized");
+                return;
+            }
+            
+            CardDetectorJNI.nativeSetOverlay(
+                enabled,
+                (float) x,
+                (float) y,
+                (float) width,
+                (float) height,
+                useROICropping
+            );
+            
+            promise.resolve(true);
+        } catch (Exception e) {
+            promise.reject("OVERLAY_ERROR", "Failed to set overlay: " + e.getMessage());
+        }
+    }
+    
+    /**
      * Check if detector is initialized
      */
     @ReactMethod

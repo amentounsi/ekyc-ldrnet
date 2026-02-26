@@ -27,6 +27,14 @@ interface CardDetectorNativeModule {
     targetRatio: number,
     ratioTolerance: number
   ): Promise<boolean>;
+  setOverlay(
+    enabled: boolean,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    useROICropping: boolean
+  ): Promise<boolean>;
   isInitialized(): Promise<boolean>;
   getConstants(): CardDetectorConstants;
 }
@@ -117,6 +125,37 @@ class CardDetectorModule {
       );
     } catch (error) {
       console.error('Failed to set CardDetector config:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Set overlay-guided detection bounds
+   * @param enabled - Enable overlay-guided detection
+   * @param bounds - Normalized overlay bounds (0-1)
+   * @param useROICropping - Crop frame to ROI before detection
+   */
+  async setOverlay(
+    enabled: boolean,
+    bounds: { x: number; y: number; width: number; height: number } | null = null,
+    useROICropping: boolean = true
+  ): Promise<boolean> {
+    const x = enabled && bounds ? bounds.x : 0;
+    const y = enabled && bounds ? bounds.y : 0;
+    const width = enabled && bounds ? bounds.width : 0;
+    const height = enabled && bounds ? bounds.height : 0;
+
+    try {
+      return await CardDetectorNative.setOverlay(
+        enabled,
+        x,
+        y,
+        width,
+        height,
+        useROICropping
+      );
+    } catch (error) {
+      console.error('Failed to set CardDetector overlay:', error);
       throw error;
     }
   }
