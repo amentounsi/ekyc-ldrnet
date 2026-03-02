@@ -19,8 +19,20 @@
 #include <android/log.h>
 
 #define LOG_TAG "CardDetector"
-#define LOGD(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
+
+// Performance: Disable verbose debug logging in production
+// Set to 1 for detailed stage-by-stage logging, 0 for performance
+#define CARDDETECTOR_VERBOSE_LOG 0
+
+#if CARDDETECTOR_VERBOSE_LOG
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGD(...) ((void)0)  // No-op when disabled
+#endif
+
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace CardDetection {
 

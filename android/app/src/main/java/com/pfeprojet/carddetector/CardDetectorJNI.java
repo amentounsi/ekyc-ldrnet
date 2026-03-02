@@ -66,6 +66,13 @@ public class CardDetectorJNI {
     );
     
     /**
+     * Set scan mode for card detection
+     * 
+     * @param mode 0 = FRONT (requires red flag), 1 = BACK (no red flag needed)
+     */
+    public static native void nativeSetScanMode(int mode);
+    
+    /**
      * Detect card from YUV frame data
      * Optimized for camera frames
      *
@@ -114,4 +121,39 @@ public class CardDetectorJNI {
         int width,
         int height
     );
+    
+    /**
+     * Get the last warped image as RGBA byte array
+     * Available after a successful detection
+     * 
+     * @return RGBA byte array (1000x630x4 bytes) or null if not available
+     */
+    public static native byte[] nativeGetWarpedImage();
+    
+    /**
+     * Get dimensions of the warped image
+     * 
+     * @return int[2]: [width, height] (1000, 630) or (0, 0) if not available
+     */
+    public static native int[] nativeGetWarpedImageDimensions();
+    
+    /**
+     * Classify the last warped image as FRONT, BACK, or UNKNOWN
+     * Phase 2 - Recto/Verso Classification
+     * 
+     * @return float[12]:
+     *   [0] side (0=UNKNOWN, 1=FRONT, 2=BACK)
+     *   [1] confidence (0-1)
+     *   [2] flagDetected (0 or 1)
+     *   [3] flagRedRatio (0-1)
+     *   [4] photoTextureDetected (0 or 1)
+     *   [5] photoStddev (0-255)
+     *   [6] barcodeDetected (0 or 1)
+     *   [7] barcodeEdgeDensity (0-1)
+     *   [8] fingerprintDetected (0 or 1)
+     *   [9] fingerprintStddev (0-255)
+     *   [10] meanBrightness (0-255)
+     *   [11] brightEnough (0 or 1)
+     */
+    public static native float[] nativeClassifyCardSide();
 }

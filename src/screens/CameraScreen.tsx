@@ -14,6 +14,11 @@ import {
   PermissionsAndroid,
   Alert,
   ActivityIndicator,
+  TouchableOpacity,
+  Image,
+  NativeModules,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import {
   Camera,
@@ -45,6 +50,12 @@ interface CameraScreenProps {
   
   /** Show debug info */
   showDebugInfo?: boolean;
+  
+  /** Callback to open WarpTestScreen (debug) */
+  onOpenWarpTest?: () => void;
+  
+  /** Whether the screen is visible (controls camera activation) */
+  isVisible?: boolean;
 }
 
 /**
@@ -55,6 +66,8 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   enableTorch = false,
   onCardDetected,
   showDebugInfo = true,
+  onOpenWarpTest,
+  isVisible = true,
 }) => {
   // Camera permission
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -69,6 +82,11 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     height: SCREEN_HEIGHT,
   });
   
+  // Sync isActive with isVisible prop
+  useEffect(() => {
+    setIsActive(isVisible);
+  }, [isVisible]);
+  
   // Camera ref
   const cameraRef = useRef<Camera>(null);
   
@@ -81,6 +99,45 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     height: number;
   } | null>(null);
   
+  // Capture preview state
+  const [capturedImage, setCapturedImage] = useState<{
+    base64: string;
+    width: number;
+    height: number;
+  } | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  
+  // Scan mode: FRONT or BACK (controls red validation bypass)
+  const [scanMode, setScanModeState] = useState<'FRONT' | 'BACK'>('FRONT');
+  
+  const { CardDetectorModule } = NativeModules;
+  
+  // Capture warped image function
+  const captureWarpedImage = useCallback(async () => {
+    if (isCapturing) return;
+    setIsCapturing(true);
+    
+    try {
+      const result = await CardDetectorModule.getWarpedImage();
+      if (result && result.base64) {
+        setCapturedImage(result);
+        setShowPreview(true);
+      } else {
+        Alert.alert('Capture Failed', 'No warped image available. Make sure detection shows "Size: 1000×630 ✓"');
+      }
+    } catch (error) {
+      Alert.alert('Error', `Failed to capture: ${error}`);
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [isCapturing, CardDetectorModule]);
+  
+  // Close preview
+  const closePreview = useCallback(() => {
+    setShowPreview(false);
+  }, []);
+  
   // Card detection hook
   const {
     detectionResult,
@@ -90,11 +147,31 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   } = useCardDetection({
     enabled: isActive && hasPermission,
     onCardDetected,
-    throttleMs: 50, // Update every 50ms for smoother overlay
+    throttleMs: 100, // Update every 100ms for smoother performance
     useOverlay: overlayEnabled,
     overlayBounds,
     useROICropping: false,  // Full frame detection; overlay used for constraint validation only
   });
+  
+  // Update scan mode in native module when changed (only after detector is ready)
+  useEffect(() => {
+    if (!isReady) return;  // Wait for detector to be initialized
+    
+    const updateScanMode = async () => {
+      try {
+        await CardDetectorModule.setScanMode(scanMode);
+        console.log(`Scan mode set to: ${scanMode}`);
+      } catch (error) {
+        console.error('Failed to set scan mode:', error);
+      }
+    };
+    updateScanMode();
+  }, [scanMode, isReady, CardDetectorModule]);
+  
+  // Wrapper function to change scan mode
+  const setScanMode = (mode: 'FRONT' | 'BACK') => {
+    setScanModeState(mode);
+  };
   
   // Calculate and set overlay bounds once we have frame dimensions
   useEffect(() => {
@@ -252,6 +329,34 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
         )}
       </View>
       
+      {/* Scan Mode Toggle - FRONT / BACK */}
+      <View style={styles.scanModeContainer}>
+        <TouchableOpacity
+          style={[
+            styles.scanModeButton,
+            scanMode === 'FRONT' && styles.scanModeButtonActive,
+          ]}
+          onPress={() => setScanMode('FRONT')}
+        >
+          <Text style={[
+            styles.scanModeButtonText,
+            scanMode === 'FRONT' && styles.scanModeButtonTextActive,
+          ]}>RECTO</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.scanModeButton,
+            scanMode === 'BACK' && styles.scanModeButtonActive,
+          ]}
+          onPress={() => setScanMode('BACK')}
+        >
+          <Text style={[
+            styles.scanModeButtonText,
+            scanMode === 'BACK' && styles.scanModeButtonTextActive,
+          ]}>VERSO</Text>
+        </TouchableOpacity>
+      </View>
+      
       {/* Debug Info – stage-by-stage visibility */}
       {showDebugInfo && (
         <View style={styles.debugContainer}>
@@ -289,10 +394,98 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
               <Text style={styles.debugText}>
                 S4 best: {detectionResult.debug.bestScore?.toFixed(3) || '—'}
               </Text>
+              {detectionResult.debug.hasWarpedImage && (
+                <>
+                  <Text style={styles.debugSeparator}>── Warp ──</Text>
+                  <Text style={styles.debugText}>
+                    Size: 1000×630 ✓
+                  </Text>
+                  <Text style={styles.debugText}>
+                    Luminance: {detectionResult.debug.warpedLuminance?.toFixed(1) || '—'}
+                  </Text>
+                  <Text style={styles.debugText}>
+                    Gamma: {detectionResult.debug.warpedGamma?.toFixed(2) || '—'}
+                  </Text>
+                </>
+              )}
+              {/* Warp Test Button (Debug) */}
+              {onOpenWarpTest && (
+                <TouchableOpacity
+                  style={styles.warpTestButton}
+                  onPress={() => {
+                    // Small delay to ensure frame processor finishes before navigation
+                    setTimeout(() => {
+                      onOpenWarpTest();
+                    }, 50);
+                  }}
+                >
+                  <Text style={styles.warpTestButtonText}>🔍 Open Warp Test</Text>
+                </TouchableOpacity>
+              )}
             </>
           )}
         </View>
       )}
+      
+      {/* Capture Button - appears when warp is available */}
+      {detectionResult?.debug?.hasWarpedImage && (
+        <TouchableOpacity
+          style={[styles.captureButton, isCapturing && styles.captureButtonDisabled]}
+          onPress={captureWarpedImage}
+          disabled={isCapturing}
+        >
+          <Text style={styles.captureButtonText}>
+            {isCapturing ? '⏳' : '📷'} {isCapturing ? 'Capturing...' : 'CAPTURE'}
+          </Text>
+        </TouchableOpacity>
+      )}
+      
+      {/* Preview Modal */}
+      <Modal
+        visible={showPreview}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={closePreview}
+      >
+        <View style={styles.previewOverlay}>
+          <View style={styles.previewContainer}>
+            <Text style={styles.previewTitle}>Warped Image Captured</Text>
+            
+            {capturedImage && (
+              <>
+                <View style={styles.previewImageContainer}>
+                  <Image
+                    source={{ uri: `data:image/png;base64,${capturedImage.base64}` }}
+                    style={styles.previewImage}
+                    resizeMode="contain"
+                  />
+                  <View style={styles.previewDimensionsBadge}>
+                    <Text style={styles.previewDimensionsText}>
+                      {capturedImage.width} × {capturedImage.height} px
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={styles.previewChecklist}>
+                  <Text style={styles.previewCheckItem}>
+                    {capturedImage.width === 1000 ? '✅' : '❌'} Width = 1000 px
+                  </Text>
+                  <Text style={styles.previewCheckItem}>
+                    {capturedImage.height === 630 ? '✅' : '❌'} Height = 630 px
+                  </Text>
+                  <Text style={styles.previewCheckHint}>
+                    Check: No flip, no rotation, text readable
+                  </Text>
+                </View>
+              </>
+            )}
+            
+            <TouchableOpacity style={styles.previewCloseButton} onPress={closePreview}>
+              <Text style={styles.previewCloseButtonText}>Close & Continue</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -351,6 +544,35 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
   },
+  scanModeContainer: {
+    position: 'absolute',
+    top: 120,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 16,
+  },
+  scanModeButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#666',
+  },
+  scanModeButtonActive: {
+    backgroundColor: 'rgba(0, 255, 0, 0.3)',
+    borderColor: '#00FF00',
+  },
+  scanModeButtonText: {
+    color: '#888',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  scanModeButtonTextActive: {
+    color: '#00FF00',
+  },
   debugContainer: {
     position: 'absolute',
     bottom: 40,
@@ -371,6 +593,115 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
     marginTop: 4,
     marginBottom: 2,
+  },
+  warpTestButton: {
+    marginTop: 12,
+    backgroundColor: '#0066FF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  warpTestButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  // Capture button styles
+  captureButton: {
+    position: 'absolute',
+    bottom: 100,
+    right: 20,
+    backgroundColor: '#00FF00',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 12,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  captureButtonDisabled: {
+    backgroundColor: '#666',
+  },
+  captureButtonText: {
+    color: '#000',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  // Preview modal styles
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  previewContainer: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxHeight: '90%',
+  },
+  previewTitle: {
+    color: '#00FF00',
+    fontSize: 22,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  previewImageContainer: {
+    width: '100%',
+    aspectRatio: 1000 / 630,
+    backgroundColor: '#2a2a4a',
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  previewDimensionsBadge: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: '#00FF00',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 4,
+  },
+  previewDimensionsText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  previewChecklist: {
+    marginBottom: 16,
+  },
+  previewCheckItem: {
+    color: '#fff',
+    fontSize: 16,
+    marginBottom: 4,
+  },
+  previewCheckHint: {
+    color: '#888',
+    fontSize: 14,
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  previewCloseButton: {
+    backgroundColor: '#00FF00',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  previewCloseButtonText: {
+    color: '#000',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
 });
 

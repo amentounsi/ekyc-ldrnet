@@ -35,6 +35,7 @@ interface CardDetectorNativeModule {
     height: number,
     useROICropping: boolean
   ): Promise<boolean>;
+  setScanMode(mode: string): Promise<boolean>;
   isInitialized(): Promise<boolean>;
   getConstants(): CardDetectorConstants;
 }
@@ -156,6 +157,19 @@ class CardDetectorModule {
       );
     } catch (error) {
       console.error('Failed to set CardDetector overlay:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Set scan mode for card detection
+   * @param mode - 'FRONT' (requires red flag) or 'BACK' (no red flag needed)
+   */
+  async setScanMode(mode: 'FRONT' | 'BACK'): Promise<boolean> {
+    try {
+      return await CardDetectorNative.setScanMode(mode);
+    } catch (error) {
+      console.error('Failed to set scan mode:', error);
       throw error;
     }
   }
