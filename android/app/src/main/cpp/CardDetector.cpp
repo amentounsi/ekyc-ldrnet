@@ -34,6 +34,9 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+// Diagnostic tag for pipeline testing (adb logcat | grep CIN)
+#define LOGD_CIN(...) __android_log_print(ANDROID_LOG_DEBUG, "CIN", __VA_ARGS__)
+
 namespace CardDetection {
 
 // ──────────────────────────────────────────────
@@ -176,6 +179,11 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
     result.debug.candidates = candidates;
     LOGD("Stage4: bestScore=%.3f  areaRatio=%.3f  aspect=%.3f  rect=%.3f",
          best.score, best.areaRatio, best.aspectRatio, best.rectangularity);
+
+    // Stage A diagnostic: emit quad geometry for every candidate regardless of outcome
+    LOGD_CIN("DETECT quadArea=%.1f aspect=%.3f locked=%d score=%.3f",
+             static_cast<float>(best.area), best.aspectRatio,
+             detectionState_ == DetectionState::LOCKED ? 1 : 0, best.score);
 
     // Stage 5 – geometric floor check (area in range, geometry score above floor)
     // When overlay+ROI is active, the card legitimately fills most of the ROI,
@@ -363,10 +371,19 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
         LOGD("Stage6: SKIPPED (no Cr mat)");
     }
 
-    // Final confidence = geometry*0.5 + border*0.3 + red*0.2
-    float confidence = best.score * 0.5f + borderScore * 0.3f + redScore * 0.2f;
-    LOGD("Stage6b: confidence=%.3f (geo=%.3f*0.5 + border=%.3f*0.3 + red=%.3f*0.2)",
-         confidence, best.score, borderScore, redScore);
+    // Final confidence: redistribute weights when red validation disabled
+    float confidence;
+    if (config_.redValidationEnabled) {
+        // FRONT (Recto): geometry*0.5 + border*0.3 + red*0.2
+        confidence = best.score * 0.5f + borderScore * 0.3f + redScore * 0.2f;
+        LOGD("Stage6b: confidence=%.3f (geo=%.3f*0.5 + border=%.3f*0.3 + red=%.3f*0.2)",
+             confidence, best.score, borderScore, redScore);
+    } else {
+        // BACK (Verso): redistribute red weight proportionally
+        confidence = best.score * 0.625f + borderScore * 0.375f;
+        LOGD("Stage6b: confidence=%.3f (geo=%.3f*0.625 + border=%.3f*0.375) [VERSO mode]",
+             confidence, best.score, borderScore);
+    }
 
     // Final score gate
     if (confidence < config_.minScore) {
@@ -440,6 +457,13 @@ CardDetectionResult CardDetector::detectCard(const cv::Mat& frame) {
         
         LOGI("DETECTED  score=%.2f  confidence=%.2f  border=%.2f  red=%.2f  state=LOCKED",
              best.score, confidence, borderScore, redScore);
+
+        // Stage A diagnostic: quad geometry
+        {
+            float qArea = static_cast<float>(best.area);
+            LOGD_CIN("DETECT quadArea=%.1f aspect=%.3f locked=%d",
+                     qArea, best.aspectRatio, 1);
+        }
     } else {
         // State transition: track alignment progress
         if (detectionState_ == DetectionState::SEARCHING && validCount > 0) {
@@ -1468,6 +1492,26 @@ float CardDetector::computeQuadOverlayOverlap(
                          static_cast<float>(quadBoundingRect.area());
     
     return overlapRatio;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// resetTemporalState - Clear temporal buffer for mode transitions
+// ═══════════════════════════════════════════════════════════════
+
+void CardDetector::resetTemporalState() {
+    // Clear temporal buffer
+    for (auto& entry : temporalBuf_) {
+        entry.isValid = false;
+        entry.score = 0.f;
+        entry.corners = {};
+    }
+    temporalIdx_ = 0;
+
+    // Reset hysteresis state to SEARCHING
+    detectionState_ = DetectionState::SEARCHING;
+    consecutiveFailFrames_ = 0;
+
+    LOGI("resetTemporalState: buffer cleared, state → SEARCHING");
 }
 
 } // namespace CardDetection

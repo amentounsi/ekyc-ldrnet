@@ -42,6 +42,24 @@ interface ClassificationResult {
   mrzEdgeDensity: number;
 }
 
+interface LayoutValidationResult {
+  valid: boolean;
+  score: number;
+  // FRONT zones
+  flagScore?: number;
+  logoScore?: number;
+  photoScore?: number;
+  headerScore?: number;
+  idNumberScore?: number;
+  // BACK zones
+  fingerprintScore?: number;
+  barcodeScore?: number;
+  stampScore?: number;
+  textScore?: number;
+  // Shared
+  brightnessScore?: number;
+}
+
 interface WarpTestScreenProps {
   onBack?: () => void;
 }
@@ -52,10 +70,13 @@ export const WarpTestScreen: React.FC<WarpTestScreenProps> = ({ onBack }) => {
   const [captureCount, setCaptureCount] = useState(0);
   const [classification, setClassification] = useState<ClassificationResult | null>(null);
   const [isClassifying, setIsClassifying] = useState(false);
+  const [layoutResult, setLayoutResult] = useState<LayoutValidationResult | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
 
   const captureWarpedImage = useCallback(async () => {
     setIsCapturing(true);
     setClassification(null);  // Clear previous classification
+    setLayoutResult(null);    // Clear previous layout validation
     try {
       const result = await CardDetectorModule.getWarpedImage();
       if (result) {
@@ -81,6 +102,7 @@ export const WarpTestScreen: React.FC<WarpTestScreenProps> = ({ onBack }) => {
 
   const classifyCardSide = useCallback(async () => {
     setIsClassifying(true);
+    setLayoutResult(null);  // Clear layout when reclassifying
     try {
       const result = await CardDetectorModule.classifyCardSide();
       if (result) {
@@ -104,7 +126,36 @@ export const WarpTestScreen: React.FC<WarpTestScreenProps> = ({ onBack }) => {
   const clearImage = useCallback(() => {
     setWarpedImage(null);
     setClassification(null);
+    setLayoutResult(null);
   }, []);
+
+  const validateLayout = useCallback(async () => {
+    if (!classification || classification.side === 'UNKNOWN') {
+      Alert.alert(
+        'Classification Required',
+        'Please classify the card side first (FRONT or BACK).'
+      );
+      return;
+    }
+    setIsValidating(true);
+    try {
+      const result = await CardDetectorModule.validateLayout(classification.side);
+      if (result) {
+        setLayoutResult(result);
+        console.log('Layout validation result:', result);
+      } else {
+        Alert.alert(
+          'Validation Failed',
+          'No warped image available for layout validation.'
+        );
+      }
+    } catch (error) {
+      console.error('Error validating layout:', error);
+      Alert.alert('Error', `Failed to validate layout: ${error}`);
+    } finally {
+      setIsValidating(false);
+    }
+  }, [classification]);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -244,6 +295,79 @@ export const WarpTestScreen: React.FC<WarpTestScreenProps> = ({ onBack }) => {
         </View>
       )}
 
+      {/* Phase 3: Layout Validation Result */}
+      {classification && classification.side !== 'UNKNOWN' && (
+        <View style={styles.layoutBox}>
+          <Text style={styles.layoutTitle}>Phase 3: Layout Validation</Text>
+          
+          {layoutResult ? (
+            <>
+              <View style={[
+                styles.layoutResultBadge,
+                layoutResult.valid ? styles.layoutPassBadge : styles.layoutFailBadge
+              ]}>
+                <Text style={styles.layoutResultText}>
+                  {layoutResult.valid ? '✅ LAYOUT VALID' : '❌ LAYOUT INVALID'}
+                </Text>
+                <Text style={styles.layoutScoreText}>
+                  Score: {(layoutResult.score * 100).toFixed(1)}%
+                </Text>
+              </View>
+              
+              <View style={styles.metricsContainer}>
+                <Text style={styles.metricsTitle}>
+                  {classification.side === 'FRONT' ? 'Front Zone Scores:' : 'Back Zone Scores:'}
+                </Text>
+                {classification.side === 'FRONT' ? (
+                  <>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.flagScore ?? 0) > 0.5 ? '✅' : '❌'} Flag: {((layoutResult.flagScore ?? 0) * 100).toFixed(0)}% (×0.15)
+                    </Text>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.logoScore ?? 0) > 0.5 ? '✅' : '❌'} Logo: {((layoutResult.logoScore ?? 0) * 100).toFixed(0)}% (×0.15)
+                    </Text>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.photoScore ?? 0) > 0.5 ? '✅' : '❌'} Photo: {((layoutResult.photoScore ?? 0) * 100).toFixed(0)}% (×0.25)
+                    </Text>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.headerScore ?? 0) > 0.5 ? '✅' : '❌'} Header: {((layoutResult.headerScore ?? 0) * 100).toFixed(0)}% (×0.20)
+                    </Text>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.idNumberScore ?? 0) > 0.5 ? '✅' : '❌'} ID Number: {((layoutResult.idNumberScore ?? 0) * 100).toFixed(0)}% (×0.15)
+                    </Text>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.brightnessScore ?? 0) > 0.5 ? '✅' : '❌'} Brightness: {((layoutResult.brightnessScore ?? 0) * 100).toFixed(0)}% (×0.10)
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.fingerprintScore ?? 0) > 0.5 ? '✅' : '❌'} Fingerprint: {((layoutResult.fingerprintScore ?? 0) * 100).toFixed(0)}% (×0.30)
+                    </Text>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.barcodeScore ?? 0) > 0.5 ? '✅' : '❌'} Barcode: {((layoutResult.barcodeScore ?? 0) * 100).toFixed(0)}% (×0.30)
+                    </Text>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.stampScore ?? 0) > 0.5 ? '✅' : '❌'} Stamp: {((layoutResult.stampScore ?? 0) * 100).toFixed(0)}% (×0.20)
+                    </Text>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.textScore ?? 0) > 0.5 ? '✅' : '❌'} Text: {((layoutResult.textScore ?? 0) * 100).toFixed(0)}% (×0.10)
+                    </Text>
+                    <Text style={styles.metricItem}>
+                      {(layoutResult.brightnessScore ?? 0) > 0.5 ? '✅' : '❌'} Brightness: {((layoutResult.brightnessScore ?? 0) * 100).toFixed(0)}% (×0.10)
+                    </Text>
+                  </>
+                )}
+              </View>
+            </>
+          ) : (
+            <Text style={styles.classifyHint}>
+              Tap "Validate Layout" to check CIN structure
+            </Text>
+          )}
+        </View>
+      )}
+
       {/* Action Buttons */}
       <View style={styles.buttonContainer}>
         <TouchableOpacity
@@ -268,6 +392,18 @@ export const WarpTestScreen: React.FC<WarpTestScreenProps> = ({ onBack }) => {
           </TouchableOpacity>
         )}
 
+        {classification && classification.side !== 'UNKNOWN' && (
+          <TouchableOpacity
+            style={[styles.validateButton, isValidating && styles.buttonDisabled]}
+            onPress={validateLayout}
+            disabled={isValidating}
+          >
+            <Text style={styles.validateButtonText}>
+              {isValidating ? 'Validating...' : '📐 Validate Layout'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {warpedImage && (
           <TouchableOpacity
             style={styles.clearButton}
@@ -288,7 +424,8 @@ export const WarpTestScreen: React.FC<WarpTestScreenProps> = ({ onBack }) => {
           4. Return to this screen{'\n'}
           5. Tap "Capture Warped Image"{'\n'}
           6. Tap "Classify Side" to detect FRONT/BACK{'\n'}
-          7. Verify correct classification
+          7. Tap "Validate Layout" to verify CIN structure{'\n'}
+          8. Verify correct classification and validation
         </Text>
       </View>
     </ScrollView>
@@ -536,6 +673,60 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  layoutBox: {
+    backgroundColor: '#2a2a4a',
+    padding: 16,
+    borderRadius: 12,
+    width: '100%',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#ff8800',
+  },
+  layoutTitle: {
+    color: '#ff8800',
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginBottom: 12,
+  },
+  layoutResultBadge: {
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  layoutPassBadge: {
+    backgroundColor: 'rgba(0, 200, 100, 0.3)',
+    borderWidth: 2,
+    borderColor: '#00c864',
+  },
+  layoutFailBadge: {
+    backgroundColor: 'rgba(255, 60, 60, 0.3)',
+    borderWidth: 2,
+    borderColor: '#ff3c3c',
+  },
+  layoutResultText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  layoutScoreText: {
+    color: '#ccc',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  validateButton: {
+    backgroundColor: '#ff8800',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    flex: 1,
+  },
+  validateButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
   instructionsBox: {
     backgroundColor: '#2a2a4a',

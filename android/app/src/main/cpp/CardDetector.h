@@ -222,6 +222,13 @@ public:
     void            setConfig(const DetectionConfig& cfg);
     DetectionConfig getConfig() const;
 
+    /**
+     * Reset temporal state for mode transitions (FRONT ↔ BACK).
+     * Clears the temporal buffer, resets hysteresis to SEARCHING,
+     * and clears consecutive fail counter.
+     */
+    void resetTemporalState();
+
     // ── Public modular stages ──
 
     /** Stage 1 – gray → BilateralFilter → adaptive Canny → morphClose → dilate */

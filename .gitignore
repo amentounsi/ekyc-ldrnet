@@ -11,3 +11,4 @@ android/.cxx/
 .env
 ios/build/
 ios/Pods/
+"android/app/.cxx/" 

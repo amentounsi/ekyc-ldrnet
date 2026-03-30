@@ -156,4 +156,88 @@ public class CardDetectorJNI {
      *   [11] brightEnough (0 or 1)
      */
     public static native float[] nativeClassifyCardSide();
+
+    /**
+     * Validate layout of the last warped image against official CIN structure.
+     * Phase 3 - Structural Layout Validation
+     *
+     * @param side 0 = FRONT, 1 = BACK
+     * @return float[8]:
+     *   [0] valid (0 or 1)
+     *   [1] score (0-1)
+     *   [2-7] zone scores (0-1)
+     */
+    public static native float[] nativeValidateLayout(int side);
+
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 4: Presence Validation (Anti-Spoof / Liveness)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Push the current frame snapshot (raw gray + warped + quad) into
+     * the presence validator's ring buffer.
+     */
+    public static native void nativePushPresenceFrame();
+
+    /**
+     * Evaluate liveness from the buffered frames.
+     *
+     * @return float[5]:
+     *   [0] live            (0 or 1)
+     *   [1] totalScore      (0-1)
+     *   [2] homographyScore (0-1)
+     *   [3] highlightScore  (0-1)
+     *   [4] approachScore   (0-1)
+     */
+    public static native float[] nativeEvaluatePresence();
+
+    /**
+     * Reset the presence validator's ring buffer.
+     * Call on side switch, detection loss, or after capture.
+     */
+    public static native void nativeResetPresence();
+
+    // ═══════════════════════════════════════════════════════════════
+    // AUTO-CAPTURE: State Machine (Recto → Verso Flow)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Get the current capture state.
+     *
+     * @return 0 = WAIT_FRONT, 1 = WAIT_BACK, 2 = FINISHED
+     */
+    public static native int nativeGetCaptureState();
+
+    /**
+     * Reset the capture sequence to start fresh.
+     * Clears both captured images and resets to WAIT_FRONT state.
+     */
+    public static native void nativeResetCaptureSequence();
+
+    /**
+     * Attempt to auto-capture based on current state and detected side.
+     *
+     * @param detectedSide 0 = FRONT, 1 = BACK, 2 = UNKNOWN
+     * @param layoutValid  1 = valid, 0 = invalid
+     * @return float[4]:
+     *   [0] captured    (0 or 1)
+     *   [1] newState    (0 = WAIT_FRONT, 1 = WAIT_BACK, 2 = FINISHED)
+     *   [2] frontReady  (0 or 1)
+     *   [3] backReady   (0 or 1)
+     */
+    public static native float[] nativeAutoCapture(int detectedSide, int layoutValid);
+
+    /**
+     * Get the captured FRONT (recto) image as RGBA byte array.
+     *
+     * @return RGBA byte array (1000x630x4 bytes) or null if not captured
+     */
+    public static native byte[] nativeGetCapturedFront();
+
+    /**
+     * Get the captured BACK (verso) image as RGBA byte array.
+     *
+     * @return RGBA byte array (1000x630x4 bytes) or null if not captured
+     */
+    public static native byte[] nativeGetCapturedBack();
 }

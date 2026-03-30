@@ -25,6 +25,8 @@ endif()
 # Include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/warp
+    ${CMAKE_CURRENT_SOURCE_DIR}/validation
     ${OpenCV_INCLUDE_DIRS}
 )
 
@@ -32,11 +34,19 @@ include_directories(
 set(SOURCES
     CardDetector.cpp
     CardDetectorJNI.cpp
+    warp/CardWarper.cpp
+    validation/CardSideClassifier.cpp
+    validation/OfficialCINValidator.cpp
+    validation/LivePresenceValidator.cpp
 )
 
 # Header files
 set(HEADERS
     CardDetector.h
+    warp/CardWarper.h
+    validation/CardSideClassifier.h
+    validation/OfficialCINValidator.h
+    validation/LivePresenceValidator.h
 )
 
 # Create shared library

@@ -31,6 +31,8 @@
 #include "CardDetector.h"
 #include "warp/CardWarper.h"
 #include "validation/CardSideClassifier.h"
+#include "validation/OfficialCINValidator.h"
+#include "validation/LivePresenceValidator.h"
 #include <memory>
 
 #define LOG_TAG "CardDetectorJNI"
@@ -41,12 +43,53 @@ static constexpr int RESULT_LEN = 24;
 static std::unique_ptr<CardDetection::CardDetector> g_detector = nullptr;
 static std::unique_ptr<warp::CardWarper> g_warper = nullptr;
 static std::unique_ptr<validation::CardSideClassifier> g_sideClassifier = nullptr;
+static std::unique_ptr<validation::OfficialCINValidator> g_cinValidator = nullptr;
+static std::unique_ptr<validation::LivePresenceValidator> g_presenceValidator = nullptr;
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TEMPORARY DISABLE: LivePresenceValidator (DATE: 2026-03-25)
+//
+// The anti-spoof/liveness module is BYPASSED due to instability in detection.
+// All LivePresenceValidator code is preserved for future reactivation.
+//
+// Reactivation steps:
+// 1. Set ENABLE_LIVENESS = true
+// 2. Remove bypass condition from React Native (CameraScreen.tsx line ~731)
+// 3. Validate performance with real CIN cards
+// ══════════════════════════════════════════════════════════════════════════════
+static constexpr bool ENABLE_LIVENESS = false;
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUTO-CAPTURE STATE MACHINE (Recto → Verso Flow)
+//
+// State transitions:
+//   WAIT_FRONT → (capture front) → WAIT_BACK → (capture back) → FINISHED
+//
+// The system automatically transitions between states.
+// No manual input required from the user.
+// ══════════════════════════════════════════════════════════════════════════════
+enum class CaptureState {
+    WAIT_FRONT = 0,      // Waiting to capture front (recto)
+    WAIT_BACK = 1,       // Front captured, waiting to capture back (verso)
+    FINISHED = 2         // Both sides captured
+};
+
+static CaptureState g_captureState = CaptureState::WAIT_FRONT;
+static cv::Mat g_capturedFrontImage;   // Stored recto (1000x630 grayscale)
+static cv::Mat g_capturedBackImage;    // Stored verso (1000x630 grayscale)
+static bool g_hasCapturedFront = false;
+static bool g_hasCapturedBack = false;
 
 // Last warped image storage
 static cv::Mat g_lastWarpedImage;     // Grayscale warped image (1000x630)
 static bool g_hasWarpedImage = false;
 static float g_warpedLuminance = 0.f;
 static float g_warpedGamma = 1.f;
+
+// Raw gray + quad for presence validation (Phase 4)
+static cv::Mat g_lastRawGray;                       // full-res rotated gray
+static std::vector<cv::Point2f> g_lastQuadCorners;  // 4 corners in raw gray coords
+static bool g_hasQuadCorners = false;
 
 // Fill the 24-float result array from a CardDetectionResult
 static void fillResult(float* out, const CardDetection::CardDetectionResult& r) {
@@ -218,8 +261,9 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeDetectFromYUV(
             grayRotated = yMat;  // 0° — no copy
             break;
     }
-    LOGI("nativeDetectFromYUV: %dx%d rot=%d \u2192 %dx%d",
-         width, height, rotationDegrees, grayRotated.cols, grayRotated.rows);
+    // Silenced per-frame log to prevent logcat buffer flood
+    // LOGI("nativeDetectFromYUV: %dx%d rot=%d → %dx%d",
+    //      width, height, rotationDegrees, grayRotated.cols, grayRotated.rows);
 
     // ── Build Cr (V-plane) Mat for red validation ──
     // Android YUV_420_888: V plane = Cr channel, half resolution.
@@ -255,9 +299,9 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeDetectFromYUV(
     auto result = g_detector->detectCard(grayRotated);
     
     // ── Warp if detection is valid ──
-    g_hasWarpedImage = false;
-    g_warpedLuminance = 0.f;
-    g_warpedGamma = 1.f;
+    // IMPORTANT: Do NOT clear warp/quad flags unconditionally.
+    // Presence validator samples every ~400ms; clearing every 100ms frame
+    // creates temporal starvation. Only invalidate when detection truly fails.
     
     if (result.isValid && result.corners.size() == 4 && g_warper) {
         // Corners from CardDetector are already in pixel coordinates - don't multiply!
@@ -275,10 +319,22 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeDetectFromYUV(
             g_warpedLuminance = warpResult.meanLuminance;
             g_warpedGamma = warpResult.gammaUsed;
             
-            LOGI("Warp SUCCESS: %dx%d, luminance=%.1f, gamma=%.2f",
-                 g_lastWarpedImage.cols, g_lastWarpedImage.rows,
-                 g_warpedLuminance, g_warpedGamma);
+            // Store raw gray + quad for Phase 4 presence validation
+            g_lastRawGray = grayRotated.clone();
+            g_lastQuadCorners = quadPoints;
+            g_hasQuadCorners = true;
+            
+            // Silenced per-frame warp log to prevent flood
+            // LOGI("Warp SUCCESS: %dx%d, luminance=%.1f, gamma=%.2f",
+            //      g_lastWarpedImage.cols, g_lastWarpedImage.rows,
+            //      g_warpedLuminance, g_warpedGamma);
         }
+    } else {
+        // Detection truly lost — now clear persistent state
+        g_hasWarpedImage = false;
+        g_warpedLuminance = 0.f;
+        g_warpedGamma = 1.f;
+        g_hasQuadCorners = false;
     }
     
     fillResult(data, result);
@@ -481,6 +537,398 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeClassifyCardSide(JNIEnv* e
     
     env->SetFloatArrayRegion(jresult, 0, CLASSIFY_RESULT_LEN, data);
     return jresult;
+}
+
+/**
+ * Validate layout of the last warped image against official CIN structure.
+ * Must call classifyCardSide first to know which side.
+ *
+ * @param sideInt  0 = FRONT,  1 = BACK
+ *
+ * Return format (float[8]):
+ *   [0] valid         (1.0 / 0.0)
+ *   [1] score         (0..1)
+ *   [2] zone1Score    (0..1)
+ *   [3] zone2Score    (0..1)
+ *   [4] zone3Score    (0..1)
+ *   [5] zone4Score    (0..1)
+ *   [6] zone5Score    (0..1)
+ *   [7] zone6Score    (0..1)   — only used for FRONT; 0 for BACK
+ */
+JNIEXPORT jfloatArray JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeValidateLayout(
+        JNIEnv* env, jclass, jint sideInt) {
+    static constexpr int LAYOUT_RESULT_LEN = 8;
+    jfloatArray jresult = env->NewFloatArray(LAYOUT_RESULT_LEN);
+    float data[LAYOUT_RESULT_LEN] = {};
+
+    // Initialize validator if needed
+    if (!g_cinValidator) {
+        g_cinValidator = std::make_unique<validation::OfficialCINValidator>();
+        LOGI("OfficialCINValidator initialized");
+    }
+
+    // Check if warped image is available
+    if (!g_hasWarpedImage || g_lastWarpedImage.empty()) {
+        LOGE("nativeValidateLayout: No warped image available");
+        env->SetFloatArrayRegion(jresult, 0, LAYOUT_RESULT_LEN, data);
+        return jresult;
+    }
+
+    if (g_lastWarpedImage.cols != 1000 || g_lastWarpedImage.rows != 630) {
+        LOGE("nativeValidateLayout: Invalid warped image size %dx%d",
+             g_lastWarpedImage.cols, g_lastWarpedImage.rows);
+        env->SetFloatArrayRegion(jresult, 0, LAYOUT_RESULT_LEN, data);
+        return jresult;
+    }
+
+    if (sideInt == 0) {
+        // FRONT
+        validation::FrontLayoutResult r = g_cinValidator->validateFront(g_lastWarpedImage);
+        data[0] = r.valid ? 1.f : 0.f;
+        data[1] = r.score;
+        data[2] = r.flagScore;
+        data[3] = r.logoScore;
+        data[4] = r.photoScore;
+        data[5] = r.headerScore;
+        data[6] = r.idNumberScore;
+        data[7] = r.brightnessScore;
+        LOGI("Layout validation FRONT: %s score=%.3f", r.valid ? "PASS" : "FAIL", r.score);
+    } else {
+        // BACK
+        validation::BackLayoutResult r = g_cinValidator->validateBack(g_lastWarpedImage);
+        data[0] = r.valid ? 1.f : 0.f;
+        data[1] = r.score;
+        data[2] = r.fingerprintScore;
+        data[3] = r.barcodeScore;
+        data[4] = r.stampScore;
+        data[5] = r.textScore;
+        data[6] = r.brightnessScore;
+        data[7] = 0.f;  // unused for BACK
+        LOGI("Layout validation BACK: %s score=%.3f", r.valid ? "PASS" : "FAIL", r.score);
+    }
+
+    env->SetFloatArrayRegion(jresult, 0, LAYOUT_RESULT_LEN, data);
+    return jresult;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PHASE 4: Presence Validation (Anti-Spoof / Liveness)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Push the current raw gray frame, warped image, and quad corners
+ * into the presence validator's ring buffer.
+ * Call this once per detection cycle when layout is valid and side is locked.
+ */
+JNIEXPORT void JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativePushPresenceFrame(JNIEnv*, jclass) {
+    // BYPASS: Liveness disabled — do nothing
+    if (!ENABLE_LIVENESS) {
+        LOGI(">>> nativePushPresenceFrame BYPASSED (liveness disabled)");
+        return;
+    }
+
+    LOGI(">>> nativePushPresenceFrame CALLED  warp=%d quad=%d rawGray=%s",
+         g_hasWarpedImage ? 1 : 0,
+         g_hasQuadCorners ? 1 : 0,
+         g_lastRawGray.empty() ? "EMPTY" : "OK");
+
+    if (!g_presenceValidator) {
+        g_presenceValidator = std::make_unique<validation::LivePresenceValidator>();
+        LOGI("LivePresenceValidator initialized");
+    }
+
+    if (!g_hasWarpedImage || !g_hasQuadCorners) {
+        LOGE("nativePushPresenceFrame: SKIPPED — no warped image or quad corners");
+        return;
+    }
+
+    g_presenceValidator->pushFrame(g_lastRawGray, g_lastWarpedImage, g_lastQuadCorners);
+    LOGI(">>> nativePushPresenceFrame DONE");
+}
+
+/**
+ * Evaluate liveness from buffered frames.
+ *
+ * Return format (float[12]):
+ *   [0] live             (1.0 / 0.0)
+ *   [1] totalScore       (0..1)
+ *   [2] homographyScore  (0..1)
+ *   [3] highlightScore   (0..1)
+ *   [4] approachScore    (0..1)
+ *   [5] spoofDetected    (1.0 / 0.0)
+ *   [6] screenFFT        (1.0 / 0.0)
+ *   [7] subpixelGrid     (1.0 / 0.0)
+ *   [8] paperPrint       (1.0 / 0.0)
+ *   [9] temporalStable   (1.0 / 0.0)  — T8 corrected: low diff = screen
+ *  [10] textureWeak      (1.0 / 0.0)  — T10: low spatial std = screen
+ *  [11] fftStationary    (1.0 / 0.0)  — T11: identical FFT = screen
+ */
+JNIEXPORT jfloatArray JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeEvaluatePresence(JNIEnv* env, jclass) {
+    static constexpr int PRESENCE_RESULT_LEN = 12;
+    jfloatArray jresult = env->NewFloatArray(PRESENCE_RESULT_LEN);
+    float data[PRESENCE_RESULT_LEN] = {};
+
+    // BYPASS: Liveness disabled — return fake LIVE result
+    if (!ENABLE_LIVENESS) {
+        LOGI(">>> nativeEvaluatePresence BYPASSED (liveness disabled) — returning LIVE=true");
+        data[0]  = 1.f;  // live = true
+        data[1]  = 1.f;  // totalScore = 1.0 (perfect)
+        data[2]  = 1.f;  // homographyScore = 1.0
+        data[3]  = 1.f;  // highlightScore = 1.0
+        data[4]  = 1.f;  // approachScore = 1.0
+        data[5]  = 0.f;  // spoofDetected = false
+        data[6]  = 0.f;  // screenFFT = false
+        data[7]  = 0.f;  // subpixelGrid = false
+        data[8]  = 0.f;  // paperPrint = false
+        data[9]  = 0.f;  // temporalStable = false
+        data[10] = 0.f;  // textureWeak = false
+        data[11] = 0.f;  // fftStationary = false
+
+        env->SetFloatArrayRegion(jresult, 0, PRESENCE_RESULT_LEN, data);
+        return jresult;
+    }
+
+    if (!g_presenceValidator) {
+        g_presenceValidator = std::make_unique<validation::LivePresenceValidator>();
+        LOGI("LivePresenceValidator initialized (on evaluate)");
+    }
+
+    validation::PresenceResult r = g_presenceValidator->evaluate();
+    LOGI(">>> nativeEvaluatePresence: bufferSize=%d live=%d total=%.3f spoof=%d fft=%d subpx=%d paper=%d stable=%d texture=%d fftStat=%d votes=%d",
+         r.frameCount, r.live ? 1 : 0, r.totalScore,
+         r.spoofDetected ? 1 : 0, r.screenFFT ? 1 : 0,
+         r.subpixelGrid ? 1 : 0, r.paperPrint ? 1 : 0,
+         r.temporalStable ? 1 : 0, r.textureWeak ? 1 : 0,
+         r.fftStationary ? 1 : 0, r.dbgVotes);
+
+    data[0]  = r.live ? 1.f : 0.f;
+    data[1]  = r.totalScore;
+    data[2]  = r.homographyScore;
+    data[3]  = r.highlightScore;
+    data[4]  = r.approachScore;
+    data[5]  = r.spoofDetected   ? 1.f : 0.f;
+    data[6]  = r.screenFFT       ? 1.f : 0.f;
+    data[7]  = r.subpixelGrid    ? 1.f : 0.f;
+    data[8]  = r.paperPrint      ? 1.f : 0.f;
+    data[9]  = r.temporalStable  ? 1.f : 0.f;
+    data[10] = r.textureWeak     ? 1.f : 0.f;
+    data[11] = r.fftStationary   ? 1.f : 0.f;
+
+    env->SetFloatArrayRegion(jresult, 0, PRESENCE_RESULT_LEN, data);
+    return jresult;
+}
+
+/**
+ * Reset the presence validator's ring buffer.
+ * Call on side switch, detection loss, or after capture.
+ */
+JNIEXPORT void JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeResetPresence(JNIEnv*, jclass) {
+    // BYPASS: Liveness disabled — do nothing
+    if (!ENABLE_LIVENESS) {
+        LOGI(">>> nativeResetPresence BYPASSED (liveness disabled)");
+        return;
+    }
+
+    LOGI(">>> nativeResetPresence CALLED");
+    if (!g_presenceValidator) {
+        g_presenceValidator = std::make_unique<validation::LivePresenceValidator>();
+    }
+    g_presenceValidator->reset();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUTO-CAPTURE: State Machine Methods (Recto → Verso Flow)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get the current capture state.
+ * Returns: 0 = WAIT_FRONT, 1 = WAIT_BACK, 2 = FINISHED
+ */
+JNIEXPORT jint JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeGetCaptureState(JNIEnv*, jclass) {
+    return static_cast<jint>(g_captureState);
+}
+
+/**
+ * Reset the capture sequence to start fresh.
+ * Clears both captured images and resets to WAIT_FRONT state.
+ * Also resets detector to FRONT mode.
+ */
+JNIEXPORT void JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeResetCaptureSequence(JNIEnv*, jclass) {
+    LOGI(">>> nativeResetCaptureSequence: Resetting to WAIT_FRONT");
+
+    g_captureState = CaptureState::WAIT_FRONT;
+    g_capturedFrontImage.release();
+    g_capturedBackImage.release();
+    g_hasCapturedFront = false;
+    g_hasCapturedBack = false;
+
+    // Reset detector to FRONT mode (requires red flag)
+    if (g_detector) {
+        CardDetection::DetectionConfig cfg = g_detector->getConfig();
+        cfg.redValidationEnabled = true;
+        g_detector->setConfig(cfg);
+
+        // Reset temporal state for clean start
+        g_detector->resetTemporalState();
+
+        LOGI("Detector reset to FRONT mode (red validation ENABLED)");
+    }
+}
+
+/**
+ * Attempt to auto-capture based on current state and detected side.
+ *
+ * @param detectedSide  0 = FRONT, 1 = BACK, 2 = UNKNOWN (from classifier)
+ * @param layoutValid   1 = layout passed validation, 0 = failed
+ *
+ * Returns (float[4]):
+ *   [0] captured       (1.0 if capture occurred, 0.0 if not)
+ *   [1] newState       (0 = WAIT_FRONT, 1 = WAIT_BACK, 2 = FINISHED)
+ *   [2] frontReady     (1.0 if front image available)
+ *   [3] backReady      (1.0 if back image available)
+ */
+JNIEXPORT jfloatArray JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeAutoCapture(
+        JNIEnv* env, jclass,
+        jint detectedSide,
+        jint layoutValid) {
+
+    static constexpr int AUTOCAP_RESULT_LEN = 4;
+    jfloatArray jresult = env->NewFloatArray(AUTOCAP_RESULT_LEN);
+    float data[AUTOCAP_RESULT_LEN] = {};
+
+    bool captured = false;
+
+    // Only proceed if layout is valid
+    if (layoutValid == 1 && g_hasWarpedImage && !g_lastWarpedImage.empty()) {
+
+        // STATE: WAIT_FRONT — expect FRONT side (detectedSide == 0)
+        if (g_captureState == CaptureState::WAIT_FRONT && detectedSide == 0) {
+            // Capture front
+            g_capturedFrontImage = g_lastWarpedImage.clone();
+            g_hasCapturedFront = true;
+            captured = true;
+
+            LOGI(">>> AUTO-CAPTURE: FRONT captured! Transitioning to WAIT_BACK");
+
+            // Transition to WAIT_BACK
+            g_captureState = CaptureState::WAIT_BACK;
+
+            // Switch detector to BACK mode (no red flag required)
+            if (g_detector) {
+                CardDetection::DetectionConfig cfg = g_detector->getConfig();
+                cfg.redValidationEnabled = false;
+                g_detector->setConfig(cfg);
+
+                // Reset temporal state for fresh BACK detection
+                g_detector->resetTemporalState();
+
+                LOGI("Detector switched to BACK mode (red validation DISABLED)");
+            }
+
+            // Clear current detection state to force re-detection of back side
+            g_hasWarpedImage = false;
+            g_hasQuadCorners = false;
+        }
+        // STATE: WAIT_BACK — expect BACK side (detectedSide == 1)
+        else if (g_captureState == CaptureState::WAIT_BACK && detectedSide == 1) {
+            // Capture back
+            g_capturedBackImage = g_lastWarpedImage.clone();
+            g_hasCapturedBack = true;
+            captured = true;
+
+            LOGI(">>> AUTO-CAPTURE: BACK captured! Transitioning to FINISHED");
+
+            // Transition to FINISHED
+            g_captureState = CaptureState::FINISHED;
+        }
+    }
+
+    data[0] = captured ? 1.f : 0.f;
+    data[1] = static_cast<float>(static_cast<int>(g_captureState));
+    data[2] = g_hasCapturedFront ? 1.f : 0.f;
+    data[3] = g_hasCapturedBack ? 1.f : 0.f;
+
+    env->SetFloatArrayRegion(jresult, 0, AUTOCAP_RESULT_LEN, data);
+    return jresult;
+}
+
+/**
+ * Get the captured FRONT (recto) image as RGBA byte array.
+ * Returns nullptr if not captured yet.
+ */
+JNIEXPORT jbyteArray JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeGetCapturedFront(JNIEnv* env, jclass) {
+    if (!g_hasCapturedFront || g_capturedFrontImage.empty()) {
+        LOGI("nativeGetCapturedFront: No front image captured yet");
+        return nullptr;
+    }
+
+    cv::Mat grayImage = g_capturedFrontImage.isContinuous() ?
+                        g_capturedFrontImage : g_capturedFrontImage.clone();
+
+    int width = grayImage.cols;
+    int height = grayImage.rows;
+    int size = width * height * 4;
+
+    std::vector<uint8_t> rgbaData(size);
+    const uint8_t* grayPtr = grayImage.data;
+
+    for (int i = 0; i < width * height; i++) {
+        uint8_t gray = grayPtr[i];
+        rgbaData[i * 4 + 0] = gray;  // R
+        rgbaData[i * 4 + 1] = gray;  // G
+        rgbaData[i * 4 + 2] = gray;  // B
+        rgbaData[i * 4 + 3] = 255;   // A
+    }
+
+    jbyteArray result = env->NewByteArray(size);
+    env->SetByteArrayRegion(result, 0, size, reinterpret_cast<jbyte*>(rgbaData.data()));
+
+    LOGI("Returning captured FRONT image: %dx%d", width, height);
+    return result;
+}
+
+/**
+ * Get the captured BACK (verso) image as RGBA byte array.
+ * Returns nullptr if not captured yet.
+ */
+JNIEXPORT jbyteArray JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeGetCapturedBack(JNIEnv* env, jclass) {
+    if (!g_hasCapturedBack || g_capturedBackImage.empty()) {
+        LOGI("nativeGetCapturedBack: No back image captured yet");
+        return nullptr;
+    }
+
+    cv::Mat grayImage = g_capturedBackImage.isContinuous() ?
+                        g_capturedBackImage : g_capturedBackImage.clone();
+
+    int width = grayImage.cols;
+    int height = grayImage.rows;
+    int size = width * height * 4;
+
+    std::vector<uint8_t> rgbaData(size);
+    const uint8_t* grayPtr = grayImage.data;
+
+    for (int i = 0; i < width * height; i++) {
+        uint8_t gray = grayPtr[i];
+        rgbaData[i * 4 + 0] = gray;  // R
+        rgbaData[i * 4 + 1] = gray;  // G
+        rgbaData[i * 4 + 2] = gray;  // B
+        rgbaData[i * 4 + 3] = 255;   // A
+    }
+
+    jbyteArray result = env->NewByteArray(size);
+    env->SetByteArrayRegion(result, 0, size, reinterpret_cast<jbyte*>(rgbaData.data()));
+
+    LOGI("Returning captured BACK image: %dx%d", width, height);
+    return result;
 }
 
 } // extern "C"

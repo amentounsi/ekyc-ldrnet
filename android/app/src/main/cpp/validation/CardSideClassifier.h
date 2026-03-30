@@ -3,19 +3,22 @@
  * 
  * Phase 2 - Recto/Verso Classification for Tunisian CIN
  * 
- * Determines whether a normalized 1000×630 card image is:
- *   - FRONT (Recto): Contains flag, photo, ministry logo
- *   - BACK (Verso): Contains barcode, fingerprint, stamp
+ * REFACTORED: Uses symmetric weighted scoring (no trigger-based logic)
+ * 
+ * Determines whether a normalized 1000×630 grayscale card image is:
+ *   - FRONT (Recto): Photo texture + Title band + No barcode
+ *   - BACK (Verso): Barcode + Fingerprint texture + No photo
  *   - UNKNOWN: Cannot determine with confidence
  * 
  * Architecture:
  *   - Independent of CardDetector (frozen)
  *   - Independent of CardWarper (frozen)
- *   - Pure structural classification
+ *   - Pure grayscale structural classification
+ *   - No color detection (red flag removed)
  *   - No OCR, no ML, no anti-spoof
  * 
- * Input: cv::Mat exactly 1000×630 pixels
- * Output: CardSide enum
+ * Input: cv::Mat exactly 1000×630 pixels (grayscale)
+ * Output: CardSide enum with confidence score
  */
 
 #ifndef CARD_SIDE_CLASSIFIER_H
@@ -30,161 +33,149 @@ namespace validation {
 // Card Side Enumeration
 // ============================================================================
 
-/**
- * Classification result for card orientation
- */
 enum class CardSide {
-    FRONT,      // Recto - contains flag, photo, personal info
-    BACK,       // Verso - contains barcode, fingerprint, stamp
+    FRONT,      // Recto - contains photo, personal info
+    BACK,       // Verso - contains barcode, fingerprint
     UNKNOWN     // Cannot determine - fallback safety
 };
 
 // ============================================================================
-// Configuration Constants (Fixed - Do Not Modify at Runtime)
+// Configuration Constants (Fixed 1000×630 Space)
 // ============================================================================
 
-/**
- * Configuration for side classification
- * All values are fixed constants relative to 1000×630 space
- */
 struct SideClassifierConfig {
     // Expected image dimensions (MUST be exactly these)
     static constexpr int EXPECTED_WIDTH  = 1000;
     static constexpr int EXPECTED_HEIGHT = 630;
     
     // ─────────────────────────────────────────────────────────────────────────
-    // FRONT Detection: Flag ROI (Top-Left)
+    // FRONT Evidence: Photo Region (Left Side)
     // ─────────────────────────────────────────────────────────────────────────
-    static constexpr int FLAG_ROI_X      = 0;
-    static constexpr int FLAG_ROI_Y      = 0;
-    static constexpr int FLAG_ROI_WIDTH  = 180;
-    static constexpr int FLAG_ROI_HEIGHT = 150;
+    static constexpr int PHOTO_ROI_X      = 40;
+    static constexpr int PHOTO_ROI_Y      = 160;
+    static constexpr int PHOTO_ROI_WIDTH  = 300;   // 40 → 340
+    static constexpr int PHOTO_ROI_HEIGHT = 400;   // 160 → 560
     
-    // Red detection in YCrCb space (Tunisian flag red)
-    static constexpr int   CR_THRESHOLD       = 150;   // Cr > 150 → red pixel
-    static constexpr float RED_RATIO_MIN      = 0.12f; // >12% red pixels → flag detected
+    // Photo texture threshold (high stddev = portrait present)
+    static constexpr float PHOTO_STDDEV_STRONG = 30.f;
+    static constexpr float PHOTO_STDDEV_WEAK   = 25.f;
     
-    // ─────────────────────────────────────────────────────────────────────────
-    // FRONT Detection: Photo Texture ROI (Left Side)
-    // ─────────────────────────────────────────────────────────────────────────
-    static constexpr int PHOTO_ROI_X      = 0;
-    static constexpr int PHOTO_ROI_Y      = 180;
-    static constexpr int PHOTO_ROI_WIDTH  = 350;
-    static constexpr int PHOTO_ROI_HEIGHT = 450;  // 180 → 630
-    
-    // Texture variance threshold (face has moderate texture)
-    static constexpr float PHOTO_STDDEV_MIN = 20.f;
+    // Score weights
+    static constexpr float PHOTO_SCORE_WEIGHT = 0.4f;
     
     // ─────────────────────────────────────────────────────────────────────────
-    // Overall Brightness Check
+    // FRONT Evidence: Title Text Band (Top Horizontal Edges)
     // ─────────────────────────────────────────────────────────────────────────
-    static constexpr float BRIGHTNESS_MIN = 90.f;  // Reject very dark images
+    static constexpr int TITLE_ROI_X      = 0;
+    static constexpr int TITLE_ROI_Y      = 20;
+    static constexpr int TITLE_ROI_WIDTH  = 1000;
+    static constexpr int TITLE_ROI_HEIGHT = 100;   // 20 → 120
+    
+    // Horizontal edge density for title text
+    static constexpr float TITLE_EDGE_DENSITY_MIN = 0.08f;
+    static constexpr float TITLE_SCORE_WEIGHT = 0.3f;
     
     // ─────────────────────────────────────────────────────────────────────────
-    // BACK Detection: Barcode ROI (Bottom Strip)
+    // FRONT Evidence: No Barcode in Bottom (negative BACK signal)
+    // ─────────────────────────────────────────────────────────────────────────
+    static constexpr float NO_BARCODE_DENSITY_MAX = 0.06f;
+    static constexpr float NO_BARCODE_SCORE_WEIGHT = 0.3f;
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // BACK Evidence: Barcode Region (Bottom Strip)
     // ─────────────────────────────────────────────────────────────────────────
     static constexpr int BARCODE_ROI_X      = 0;
     static constexpr int BARCODE_ROI_Y      = 520;
     static constexpr int BARCODE_ROI_WIDTH  = 1000;
     static constexpr int BARCODE_ROI_HEIGHT = 110;  // 520 → 630
     
-    // Barcode edge density threshold (vertical lines)
+    // Vertical edge density for barcode detection
     static constexpr float BARCODE_EDGE_DENSITY_MIN = 0.08f;
+    static constexpr float BARCODE_SCORE_WEIGHT = 0.5f;
     
     // ─────────────────────────────────────────────────────────────────────────
-    // BACK Detection: Fingerprint ROI (Right Side)
+    // BACK Evidence: Fingerprint Region (Right Side) — Tightened to avoid barcode overlap
     // ─────────────────────────────────────────────────────────────────────────
     static constexpr int FINGERPRINT_ROI_X      = 650;
-    static constexpr int FINGERPRINT_ROI_Y      = 150;
-    static constexpr int FINGERPRINT_ROI_WIDTH  = 350;
-    static constexpr int FINGERPRINT_ROI_HEIGHT = 350;  // 150 → 500
+    static constexpr int FINGERPRINT_ROI_Y      = 284;
+    static constexpr int FINGERPRINT_ROI_WIDTH  = 270;  // 650 → 920 (was 950)
+    static constexpr int FINGERPRINT_ROI_HEIGHT = 220;  // 284 → 504 (was 150→480)
     
-    // Fingerprint texture threshold (high local variance)
-    static constexpr float FINGERPRINT_STDDEV_MIN = 25.f;
-    
-    // ─────────────────────────────────────────────────────────────────────────
-    // BACK Detection: MRZ Text ROI (Bottom - 2 lines of machine-readable text)
-    // ─────────────────────────────────────────────────────────────────────────
-    static constexpr int MRZ_ROI_X      = 50;
-    static constexpr int MRZ_ROI_Y      = 540;
-    static constexpr int MRZ_ROI_WIDTH  = 900;
-    static constexpr int MRZ_ROI_HEIGHT = 80;   // Contains 2 MRZ lines
-    
-    // MRZ horizontal edge density threshold (text lines)
-    static constexpr float MRZ_EDGE_DENSITY_MIN = 0.05f;
+    // Fingerprint texture threshold
+    static constexpr float FINGERPRINT_STDDEV_MIN = 35.f;
+    static constexpr float FINGERPRINT_SCORE_WEIGHT = 0.3f;
     
     // ─────────────────────────────────────────────────────────────────────────
-    // CLAHE Preprocessing (applied like CardDetector Stage 1)
+    // BACK Evidence: No Photo Texture (negative FRONT signal)
     // ─────────────────────────────────────────────────────────────────────────
-    static constexpr double CLAHE_CLIP_LIMIT      = 2.0;
-    static constexpr int    CLAHE_TILE_SIZE       = 8;
-    static constexpr int    GAUSSIAN_BLUR_SIZE    = 5;
+    static constexpr float NO_PHOTO_STDDEV_MAX = 25.f;
+    static constexpr float NO_PHOTO_SCORE_WEIGHT = 0.2f;
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // CLAHE Preprocessing
+    // ─────────────────────────────────────────────────────────────────────────
+    static constexpr double CLAHE_CLIP_LIMIT   = 2.0;
+    static constexpr int    CLAHE_TILE_SIZE    = 8;
+    static constexpr int    GAUSSIAN_BLUR_SIZE = 5;
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // Overall Brightness Check
+    // ─────────────────────────────────────────────────────────────────────────
+    static constexpr float BRIGHTNESS_MIN = 90.f;
 };
 
 // ============================================================================
 // Classification Result with Debug Info
 // ============================================================================
 
-/**
- * Detailed result with metrics for debugging
- */
 struct SideClassificationResult {
     CardSide side;              // Final classification
-    
-    // FRONT metrics
-    bool  flagDetected;         // Red flag found in top-left
-    float flagRedRatio;         // Red pixel ratio in flag ROI
-    bool  photoTextureDetected; // Photo texture found
-    float photoStddev;          // Stddev in photo ROI
-    
-    // BACK metrics
-    bool  barcodeDetected;      // Barcode edge pattern found
-    float barcodeEdgeDensity;   // Edge density in barcode ROI
-    bool  fingerprintDetected;  // Fingerprint texture found
-    float fingerprintStddev;    // Stddev in fingerprint ROI
-    bool  mrzDetected;          // MRZ text pattern found (BACK indicator)
-    float mrzEdgeDensity;       // Horizontal edge density in MRZ ROI
-    
-    // Overall
-    float meanBrightness;       // Overall card brightness
-    bool  brightEnough;         // Above minimum brightness
-    
-    // Confidence
     float confidence;           // 0-1 classification confidence
+    
+    // Accumulated scores (for symmetric decision)
+    float frontScore;           // Total FRONT evidence score
+    float backScore;            // Total BACK evidence score
+    
+    // Individual signal metrics (for debugging/tuning)
+    float photoStddev;          // Photo region texture (FRONT signal)
+    float titleEdgeDensity;     // Title band horizontal edges (FRONT signal)
+    float barcodeEdgeDensity;   // Barcode vertical edges (BACK signal)
+    float fingerprintStddev;    // Fingerprint region texture (BACK signal)
+    
+    // Overall image metrics
+    float meanBrightness;
+    bool  brightEnough;
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // Legacy fields for JNI compatibility (computed from new logic)
+    // ─────────────────────────────────────────────────────────────────────────
+    bool  flagDetected;         // Always false (red detection removed)
+    float flagRedRatio;         // Always 0 (red detection removed)
+    bool  photoTextureDetected; // Derived from photoStddev > threshold
+    bool  barcodeDetected;      // Derived from barcodeEdgeDensity > threshold
+    bool  fingerprintDetected;  // Derived from fingerprintStddev > threshold
+    bool  mrzDetected;          // Always false (MRZ merged into barcode)
+    float mrzEdgeDensity;       // Always 0 (MRZ merged into barcode)
 };
 
 // ============================================================================
 // CardSideClassifier Class
 // ============================================================================
 
-/**
- * Classifier for determining CIN card side (FRONT/BACK)
- * 
- * Usage:
- *   CardSideClassifier classifier;
- *   CardSide side = classifier.classify(warpedImage);
- *   // or for detailed result:
- *   SideClassificationResult result = classifier.classifyWithDetails(warpedImage);
- */
 class CardSideClassifier {
 public:
-    /**
-     * Default constructor
-     */
     CardSideClassifier() = default;
     
     /**
      * Classify card side (simple interface)
-     * 
-     * @param warpedImage  Normalized card image (MUST be 1000×630)
+     * @param warpedImage  Grayscale 1000×630 warped image
      * @return CardSide::FRONT, CardSide::BACK, or CardSide::UNKNOWN
      */
     CardSide classify(const cv::Mat& warpedImage);
     
     /**
      * Classify with detailed metrics (for debugging)
-     * 
-     * @param warpedImage  Normalized card image (MUST be 1000×630)
+     * @param warpedImage  Grayscale 1000×630 warped image
      * @return Full result with all detection metrics
      */
     SideClassificationResult classifyWithDetails(const cv::Mat& warpedImage);
@@ -196,14 +187,8 @@ public:
 
 private:
     // ─────────────────────────────────────────────────────────────────────────
-    // Detection Methods
+    // Detection Methods (All grayscale-based)
     // ─────────────────────────────────────────────────────────────────────────
-    
-    /**
-     * Detect red flag in top-left ROI
-     * @return Red pixel ratio (0-1)
-     */
-    float detectFlag(const cv::Mat& image);
     
     /**
      * Detect photo texture in left side ROI
@@ -212,16 +197,16 @@ private:
     float detectPhotoTexture(const cv::Mat& image);
     
     /**
-     * Detect barcode in bottom ROI using vertical edge density
-     * @return Edge density (0-1)
-     */
-    float detectBarcode(const cv::Mat& image);
-    
-    /**
-     * Detect MRZ text lines in bottom ROI using horizontal edge density
+     * Detect title text band using horizontal edge density
      * @return Horizontal edge density (0-1)
      */
-    float detectMRZ(const cv::Mat& image);
+    float detectTitleBand(const cv::Mat& image);
+    
+    /**
+     * Detect barcode in bottom ROI using vertical edge density
+     * @return Vertical edge density (0-1)
+     */
+    float detectBarcode(const cv::Mat& image);
     
     /**
      * Detect fingerprint texture in right side ROI
@@ -235,27 +220,13 @@ private:
      */
     float computeMeanBrightness(const cv::Mat& image);
     
-    /**
-     * Safely extract ROI with bounds checking
-     */
+    // ─────────────────────────────────────────────────────────────────────────
+    // Utility Methods
+    // ─────────────────────────────────────────────────────────────────────────
+    
     cv::Mat extractROI(const cv::Mat& image, int x, int y, int width, int height);
-    
-    /**
-     * Convert image to grayscale if needed
-     */
     cv::Mat ensureGrayscale(const cv::Mat& image);
-    
-    /**
-     * Apply CLAHE preprocessing (like CardDetector Stage 1)
-     * Normalizes local contrast for better feature detection
-     */
     cv::Mat applyCLAHE(const cv::Mat& grayImage);
-    
-    /**
-     * Adaptive edge detection similar to CardDetector
-     * Uses median-based Canny thresholds
-     */
-    cv::Mat adaptiveEdgeDetection(const cv::Mat& grayImage);
 };
 
 } // namespace validation

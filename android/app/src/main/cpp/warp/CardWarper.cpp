@@ -28,6 +28,9 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+// Diagnostic tag for pipeline testing (adb logcat | grep CIN)
+#define LOGD_CIN(...) __android_log_print(ANDROID_LOG_DEBUG, "CIN", __VA_ARGS__)
+
 namespace warp {
 
 // ============================================================================
@@ -155,7 +158,22 @@ WarpResult CardWarper::warp(const cv::Mat& frame,
     
     result.warpedImage = warped;
     result.success = true;
-    
+
+    // Stage B diagnostic: warp verification
+    {
+        cv::Mat warpedGrayDiag;
+        if (warped.channels() == 1) {
+            warpedGrayDiag = warped;
+        } else {
+            cv::cvtColor(warped, warpedGrayDiag, cv::COLOR_BGR2GRAY);
+        }
+        cv::Scalar meanVal, stdVal;
+        cv::meanStdDev(warpedGrayDiag, meanVal, stdVal);
+        LOGD_CIN("WARP size=%dx%d mean=%.1f std=%.1f",
+                 warpedGrayDiag.cols, warpedGrayDiag.rows,
+                 meanVal[0], stdVal[0]);
+    }
+
     return result;
 }
 
