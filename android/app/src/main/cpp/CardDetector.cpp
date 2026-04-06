@@ -491,7 +491,6 @@ cv::Mat CardDetector::preprocessFrame(const cv::Mat& input) {
     else
         gray_ = input;  // already gray — no copy needed
 
-    // Diagnostic
     // Compute stddev first — used both for diagnostics and CLAHE decision.
     double grayStdDev = 0.0;
     {
@@ -502,66 +501,52 @@ cv::Mat CardDetector::preprocessFrame(const cv::Mat& input) {
              gray_.cols, gray_.rows, m[0], s[0]);
     }
 
-    // 1-b  Adaptive CLAHE – intensity conditioned on scene stddev.
-    //      On dark textured backgrounds (mousepad, etc.) CLAHE amplifies micro-texture
-    //      → Canny produces 80k+ edges → card contour fuses with background.
-    //      Reduce or skip CLAHE when stddev is low.
+    // 1-b  Adaptive CLAHE
     cv::Mat claheOut;
     if (grayStdDev < 35.0) {
-        // Dark / very uniform scene: skip CLAHE entirely.
         claheOut = gray_;
         LOGD("Stage1: CLAHE SKIPPED (stddev=%.1f < 35)", grayStdDev);
     } else if (grayStdDev < 55.0) {
-        // Moderate contrast (hand-held, indoor): gentle boost.
         cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(1.2, cv::Size(6, 6));
         clahe->apply(gray_, claheOut);
         LOGD("Stage1: CLAHE clipLimit=1.2 (stddev=%.1f)", grayStdDev);
     } else {
-        // High contrast scene (bright background, beige desk): full boost.
         cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(1.5, cv::Size(6, 6));
         clahe->apply(gray_, claheOut);
         LOGD("Stage1: CLAHE clipLimit=1.5 (stddev=%.1f)", grayStdDev);
     }
 
-    // 1-c  GaussianBlur – smooth noise after CLAHE
+    // 1-c  GaussianBlur
     int ks = (config_.gaussianBlurSize % 2 == 0) ? config_.gaussianBlurSize + 1
                                                   : config_.gaussianBlurSize;
     cv::GaussianBlur(claheOut, blurred_, cv::Size(ks, ks), 0);
 
-    // 1-c  Adaptive Canny – thresholds derived from median of CENTRAL ROI only.
-    //      Using the full-frame median includes uniform background (beige desk etc.)
-    //      which lowers the median and miscalibrates Canny thresholds.
-    //      Central 40% region captures contrasted card/background boundary.
+    // 1-d  Adaptive Canny
     {
         int rx = blurred_.cols * 3 / 10;
         int ry = blurred_.rows * 3 / 10;
         int rw = blurred_.cols * 4 / 10;
         int rh = blurred_.rows * 4 / 10;
-        // clamp to valid bounds
         rx = std::max(0, std::min(rx, blurred_.cols - 2));
         ry = std::max(0, std::min(ry, blurred_.rows - 2));
         rw = std::max(2, std::min(rw, blurred_.cols - rx));
         rh = std::max(2, std::min(rh, blurred_.rows - ry));
         cv::Mat roiBlurred = blurred_(cv::Rect(rx, ry, rw, rh));
         cv::Mat flat;
-        roiBlurred.clone().reshape(1, 1).copyTo(flat);  // clone() → makes contiguous before reshape
+        roiBlurred.clone().reshape(1, 1).copyTo(flat);
         std::sort(flat.begin<uchar>(), flat.end<uchar>());
         double med = static_cast<double>(flat.at<uchar>(flat.total() / 2));
-        // Cap thresholds: card border on light bg has gradient ~20-30, so low must stay ≤20
         int cannyLow  = std::max(10, std::min(20, static_cast<int>(med * config_.cannyMedianLow)));
         int cannyHigh = std::max(cannyLow + 20,
                                  std::min(50, static_cast<int>(med * config_.cannyMedianHigh)));
-        LOGD("Stage1: adaptiveCanny (central ROI %dx%d)  median=%.0f  low=%d  high=%d",
-             rw, rh, med, cannyLow, cannyHigh);
+        LOGD("Stage1: adaptiveCanny median=%.0f low=%d high=%d", med, cannyLow, cannyHigh);
         cv::Canny(blurred_, edges_, cannyLow, cannyHigh);
     }
 
-    // Save raw Canny BEFORE morphological ops (for edge density check in Stage 3)
+    // Save raw Canny BEFORE morphological ops
     cannyEdges_ = edges_.clone();
 
-    // 1-d  Single 3×3 dilate to reconnect fragmented card border edges.
-    //      Avoids heavy morphClose which can merge unrelated edges.
-    //      One iteration is sufficient to close 1-2px gaps from low-contrast borders.
+    // 1-e  Single 3x3 dilate
     cv::Mat dk3 = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
     cv::dilate(edges_, edges_, dk3, cv::Point(-1,-1), 1);
 
@@ -589,10 +574,28 @@ CardDetector::extractContours(const cv::Mat& edges) {
     float areaHigh = config_.maxAreaRatio;
     std::vector<std::vector<cv::Point>> filtered;
     filtered.reserve(all.size());
+    
+    // Diagnostic: track largest rejected contour
+    double largestRejArea = 0.0;
+    int rejTooSmall = 0, rejTooLarge = 0;
+    
     for (auto& c : all) {
-        double r = cv::contourArea(c) / imageArea;
-        if (r >= areaLow && r <= areaHigh)
+        double area = cv::contourArea(c);
+        double r = area / imageArea;
+        if (r >= areaLow && r <= areaHigh) {
             filtered.push_back(std::move(c));
+        } else {
+            if (r < areaLow) rejTooSmall++;
+            else rejTooLarge++;
+            if (area > largestRejArea) largestRejArea = area;
+        }
+    }
+    
+    if (filtered.empty() && totalFound > 0) {
+        LOGI("Stage2: ALL %d contours rejected! largest=%.1f%% range=[%.3f%%,%.1f%%] tooSmall=%d tooLarge=%d",
+             totalFound, largestRejArea / imageArea * 100,
+             areaLow * 100, areaHigh * 100,
+             rejTooSmall, rejTooLarge);
     }
 
     // 1. Sort by area DESC, keep a pool of topN×3 (larger pool compensates for RETR_LIST duplicates).

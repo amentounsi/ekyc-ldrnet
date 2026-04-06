@@ -136,26 +136,25 @@ struct DetectionConfig {
     
     // --- Stage 1: preprocessing ---
     // CLAHE: local contrast enhancement (critical for card on light desk)
-    double claheClipLimit    = 2.0;   // higher = more contrast boost
+    double claheClipLimit    = 3.0;   // INCREASED: more contrast boost for low light
     int    claheTileSize     = 8;     // grid size (8x8 tiles at 480px)
     int   gaussianBlurSize   = 5;     // applied AFTER CLAHE
     // Adaptive Canny (calculated AFTER blur on blurred image)
-    float cannyMedianLow       = 0.33f;  // Canny low  = median * 0.33
-    float cannyMedianHigh      = 1.10f;  // Canny high = median * 1.10
+    float cannyMedianLow       = 0.30f;  // LOWERED: detect more edges in low contrast
+    float cannyMedianHigh      = 1.00f;  // LOWERED: detect more edges in low contrast
     int   morphCloseSize       = 5;      // bridge broken edges at card border
     int   dilateSize           = 3;
     int   processWidth         = 480;    // 44% fewer pixels vs 640
 
     // --- Stage 2: contour extraction ---
-    int topN                   = 8;
+    int topN                   = 10;     // INCREASED: consider more candidates
 
     // --- Stage 3: geometric filter ---
-    float minAreaRatio         = 0.010f; // 1.0% min (card far from camera or on cluttered bg)
-    float maxAreaRatio         = 0.20f;  // PHYSICAL CONSTRAINT: handheld CIN never exceeds 20% of frame
-                                         // (screens/desks covering 30-40% → rejected)
+    float minAreaRatio         = 0.008f; // LOWERED: detect smaller cards (further away)
+    float maxAreaRatio         = 0.25f;  // max fraction of frame area for card contour
     float targetAspectRatio    = 1.586f; // ID-1 standard (85.6 x 54 mm)
-    float aspectRatioTolerance = 0.35f;  // ±35% → range 1.03-2.14 (handles tilted card + keyboard perspective)
-    float edgeDensityThreshold = 0.20f;  // 2nd-worst side must have ≥20% real edges
+    float aspectRatioTolerance = 0.28f;  // tolerance for aspect ratio matching
+    float edgeDensityThreshold = 0.15f;  // minimum edge density along card border
 
     // --- Stage 4: scoring weights ---
     float wArea             = 0.20f;
@@ -166,37 +165,37 @@ struct DetectionConfig {
 
     // --- Stage 5: final validation ---
     // minScore applies to FINAL confidence = geometry*0.5 + border*0.3 + red*0.2
-    float minScore          = 0.65f;
+    float minScore          = 0.60f;    // minimum final confidence score
     // Minimum geometry score floor (before combining with border/red)
-    float minGeometryScore  = 0.50f;
+    float minGeometryScore  = 0.40f;
     // BorderContrast normalization: contrast of 50 gray levels → score=1.0
-    float borderContrastNorm = 50.f;
+    float borderContrastNorm = 40.f;    // normalize border contrast scoring
 
     // --- Stage 5e: appearance validation (semantic filter) ---
     // Rejects objects that pass geometry but are visually not CIN cards
     bool  appearanceValidationEnabled = true;
     int   appearanceWarpWidth  = 640;   // Perspective-correct ROI width
     int   appearanceWarpHeight = 400;   // Perspective-correct ROI height (ratio ≈ 1.6)
-    float appearanceMeanMin    = 55.f;  // Reject if mean < 55 (very dark - no light at all)
-    float appearanceStddevMax  = 55.f;  // Reject if stddev > 55 (too textured)
-    float appearanceMeanLowLight = 85.f;  // Combined check threshold (lowered for low light)
-    float appearanceStddevMedium = 50.f;  // Reject if mean < 85 AND stddev > 50
+    float appearanceMeanMin    = 35.f;  // LOWERED: accept darker cards in low light
+    float appearanceStddevMax  = 60.f;  // INCREASED: allow more texture variation
+    float appearanceMeanLowLight = 70.f;  // LOWERED: allow darker images
+    float appearanceStddevMedium = 55.f;  // INCREASED: more tolerant combined check
 
     // --- Stage 6: red corner validation ---
     // Checks all 4 corners; at least 1 must pass ALL 3 conditions.
     bool  redValidationEnabled   = true;
-    int   redCrThreshold         = 145;   // Cr > 145 → red (Tunisian flag red is vivid)
-    float redMinRatio            = 0.015f;// ≥1.5% of corner zone must be red (lowered for dim light)
-    int   redWhiteYThreshold     = 180;   // Y > 180 → white pixel
-    float redWhiteMinRatio       = 0.25f; // ≥25% of zone must be white (card background)
-    float redClusterMinRatio     = 0.06f; // largest red contour ≥6% of zone (compact flag — blocks scattered PC icons)
-    float redCornerZoneW         = 0.18f; // 18% of quad width per corner zone
-    float redCornerZoneH         = 0.25f; // 25% of quad height per corner zone
+    int   redCrThreshold         = 135;   // LOWERED: detect red in dim light
+    float redMinRatio            = 0.010f;// LOWERED: accept less red coverage
+    int   redWhiteYThreshold     = 160;   // LOWERED: accept darker whites in low light
+    float redWhiteMinRatio       = 0.20f; // LOWERED: accept less white coverage
+    float redClusterMinRatio     = 0.04f; // LOWERED: accept smaller red clusters
+    float redCornerZoneW         = 0.20f; // INCREASED: larger corner zone to find flag
+    float redCornerZoneH         = 0.28f; // INCREASED: larger corner zone to find flag
 
     // --- Stage 7: temporal buffer ---
-    int temporalBufferSize     = 6;     // keep last N frames
-    int temporalMinValid       = 3;     // need M/N valid to confirm
-    int lockedFailFramesToReset = 4;    // LOCKED → SEARCHING after N consecutive fails
+    int temporalBufferSize     = 3;     // REDUCED: faster cycling
+    int temporalMinValid       = 1;     // REDUCED: detect on first valid frame
+    int lockedFailFramesToReset = 5;    // INCREASED: stay locked longer
 
     // --- Debug ---
     bool debugMode             = true;

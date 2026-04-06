@@ -3,6 +3,7 @@ android/build/
 android/app/build/
 android/.gradle/
 android/.cxx/
+android/app/.cxx/
 .gradle/
 .idea/
 *.keystore
@@ -11,4 +12,25 @@ android/.cxx/
 .env
 ios/build/
 ios/Pods/
-"android/app/.cxx/" 
+
+# Test/Debug files
+*.png
+*.txt
+!package.json
+!tsconfig.json
+!README.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Metro
+.metro-health-check*
+

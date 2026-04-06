@@ -515,6 +515,75 @@ public class CardDetectorModule extends ReactContextBaseJavaModule {
     }
 
     /**
+     * Extract the face photo from the captured FRONT image.
+     * Uses fixed crop ratios based on official Tunisian CIN layout.
+     * Warped image is 1000x630: face is in the left portion.
+     */
+    @ReactMethod
+    public void extractFacePhoto(Promise promise) {
+        try {
+            byte[] imageData = CardDetectorJNI.nativeGetCapturedFront();
+            if (imageData == null) {
+                promise.resolve(null);
+                return;
+            }
+
+            // Create full card bitmap from RGBA data (1000x630)
+            int cardW = 1000;
+            int cardH = 630;
+            android.graphics.Bitmap cardBitmap = android.graphics.Bitmap.createBitmap(
+                cardW, cardH, android.graphics.Bitmap.Config.ARGB_8888
+            );
+            java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(imageData);
+            cardBitmap.copyPixelsFromBuffer(buffer);
+
+            // Face region on Tunisian CIN (normalized ratios)
+            // Face photo is in the left side, below the header
+            float faceLeftRatio   = 0.02f;
+            float faceTopRatio    = 0.28f;
+            float faceRightRatio  = 0.27f;
+            float faceBottomRatio = 0.85f;
+
+            int faceX = (int)(cardW * faceLeftRatio);
+            int faceY = (int)(cardH * faceTopRatio);
+            int faceW = (int)(cardW * (faceRightRatio - faceLeftRatio));
+            int faceH = (int)(cardH * (faceBottomRatio - faceTopRatio));
+
+            // Ensure bounds are valid
+            faceX = Math.max(0, Math.min(faceX, cardW - 1));
+            faceY = Math.max(0, Math.min(faceY, cardH - 1));
+            faceW = Math.max(1, Math.min(faceW, cardW - faceX));
+            faceH = Math.max(1, Math.min(faceH, cardH - faceY));
+
+            // Crop face region
+            android.graphics.Bitmap faceBitmap = android.graphics.Bitmap.createBitmap(
+                cardBitmap, faceX, faceY, faceW, faceH
+            );
+
+            // Convert to Base64 PNG
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            faceBitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, baos);
+            String base64Face = android.util.Base64.encodeToString(
+                baos.toByteArray(), android.util.Base64.NO_WRAP
+            );
+
+            WritableMap result = Arguments.createMap();
+            result.putString("base64", base64Face);
+            result.putInt("width", faceW);
+            result.putInt("height", faceH);
+
+            promise.resolve(result);
+
+            cardBitmap.recycle();
+            faceBitmap.recycle();
+            baos.close();
+
+        } catch (Exception e) {
+            promise.reject("FACE_EXTRACT_ERROR", "Failed to extract face photo: " + e.getMessage());
+        }
+    }
+
+    /**
      * Get the captured BACK (verso) image as Base64 PNG.
      */
     @ReactMethod
@@ -554,6 +623,25 @@ public class CardDetectorModule extends ReactContextBaseJavaModule {
 
         } catch (Exception e) {
             promise.reject("CAPTURE_BACK_ERROR", "Failed to get captured back: " + e.getMessage());
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ANTI-SPOOF: Screen Detection Controls
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Reset screen detection state.
+     * Call when user wants to retry after screen detection blocked them.
+     * Clears temporal accumulation and allows fresh detection.
+     */
+    @ReactMethod
+    public void resetScreenDetection(Promise promise) {
+        try {
+            CardDetectorJNI.nativeResetScreenDetection();
+            promise.resolve(true);
+        } catch (Exception e) {
+            promise.reject("SCREEN_RESET_ERROR", "Failed to reset screen detection: " + e.getMessage());
         }
     }
 

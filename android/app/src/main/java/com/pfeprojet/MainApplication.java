@@ -11,6 +11,7 @@ import com.facebook.soloader.SoLoader;
 
 import com.pfeprojet.carddetector.CardDetectorPackage;
 import com.pfeprojet.carddetector.CardDetectorPluginProvider;
+import com.pfeprojet.barcode.BarcodeScannerPackage;
 
 import java.util.List;
 
@@ -34,6 +35,9 @@ public class MainApplication extends Application implements ReactApplication {
             
             // Add CardDetector package
             packages.add(new CardDetectorPackage());
+            
+            // Add BarcodeScanner package (Phase C)
+            packages.add(new BarcodeScannerPackage());
             
             return packages;
         }

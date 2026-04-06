@@ -38,6 +38,7 @@ set(SOURCES
     validation/CardSideClassifier.cpp
     validation/OfficialCINValidator.cpp
     validation/LivePresenceValidator.cpp
+    validation/ScreenDetector.cpp
 )
 
 # Header files
@@ -47,6 +48,7 @@ set(HEADERS
     validation/CardSideClassifier.h
     validation/OfficialCINValidator.h
     validation/LivePresenceValidator.h
+    validation/ScreenDetector.h
 )
 
 # Create shared library

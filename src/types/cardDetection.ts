@@ -20,12 +20,26 @@ export interface DetectionDebugInfo {
   rejectedByAspect: number;
   rejectedByEdgeDensity: number;
   largestAreaRatio: number;
+  /** Warp info */
+  hasWarpedImage?: boolean;
+  warpedLuminance?: number;
+  warpedGamma?: number;
+  /** CIN confirmation (red corner validation passed) */
+  isCINConfirmed?: boolean;
+  /** Blur detection (Phase B.5) */
+  blurScore?: number;  // Laplacian variance - higher = sharper
+  isBlurry?: boolean;  // True if blurScore < threshold (100)
+  /** Screen detection (Anti-Spoof) */
+  screenConfidence?: number;  // 0.0 = real card, 1.0 = definitely screen
+  isScreenDisplay?: boolean;  // True if screen detected
 }
 
 /** Result of card detection from a single frame */
 export interface CardDetectionResult {
   isValid: boolean;
   confidence?: number;
+  /** NEW: True if red corners validated (confirmed Tunisian CIN) */
+  isCINConfirmed?: boolean;
   corners: [Point2D, Point2D, Point2D, Point2D] | [];
   frameWidth?: number;
   frameHeight?: number;

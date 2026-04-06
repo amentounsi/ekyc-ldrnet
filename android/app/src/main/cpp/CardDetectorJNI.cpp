@@ -3,7 +3,7 @@
  * CardDetectorJNI.cpp
  * JNI bridge – exposes C++ CardDetector and CardWarper to Java/Kotlin
  *
- * Return format (float[24]):
+ * Return format (float[28]):
  *   [0]  isValid          (1.0 / 0.0)
  *   [1]  confidence       (0..1)
  *   [2..9]  corners x0,y0 … x3,y3
@@ -21,6 +21,10 @@
  *   [21] hasWarpedImage   (1.0 / 0.0)
  *   [22] warpedLuminance  (0-255)
  *   [23] warpedGamma      (gamma used)
+ *   [24] blurScore        (Laplacian variance - higher = sharper)
+ *   [25] isBlurry         (1.0 / 0.0 - true if blurScore < threshold)
+ *   [26] screenConfidence (0.0 = real card, 1.0 = definitely screen)
+ *   [27] isScreenDisplay  (1.0 / 0.0 - true if screen detected)
  */
 
 #include <jni.h>
@@ -33,18 +37,26 @@
 #include "validation/CardSideClassifier.h"
 #include "validation/OfficialCINValidator.h"
 #include "validation/LivePresenceValidator.h"
+#include "validation/ScreenDetector.h"
 #include <memory>
 
 #define LOG_TAG "CardDetectorJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-static constexpr int RESULT_LEN = 24;
+static constexpr int RESULT_LEN = 28;
 static std::unique_ptr<CardDetection::CardDetector> g_detector = nullptr;
 static std::unique_ptr<warp::CardWarper> g_warper = nullptr;
 static std::unique_ptr<validation::CardSideClassifier> g_sideClassifier = nullptr;
 static std::unique_ptr<validation::OfficialCINValidator> g_cinValidator = nullptr;
 static std::unique_ptr<validation::LivePresenceValidator> g_presenceValidator = nullptr;
+static std::unique_ptr<validation::ScreenDetector> g_screenDetector = nullptr;
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SCREEN DETECTION (Anti-Spoof) - Enabled by default
+// Rejects cards displayed on screens (phones, monitors, tablets)
+// ══════════════════════════════════════════════════════════════════════════════
+static constexpr bool ENABLE_SCREEN_DETECTION = true;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TEMPORARY DISABLE: LivePresenceValidator (DATE: 2026-03-25)
@@ -91,7 +103,107 @@ static cv::Mat g_lastRawGray;                       // full-res rotated gray
 static std::vector<cv::Point2f> g_lastQuadCorners;  // 4 corners in raw gray coords
 static bool g_hasQuadCorners = false;
 
-// Fill the 24-float result array from a CardDetectionResult
+// Blur detection (Phase B.5)
+static float g_blurScore = 0.f;         // Laplacian variance (higher = sharper)
+static bool g_isBlurry = false;         // True if blurScore < threshold
+static constexpr float BLUR_THRESHOLD = 25.f;  // Adjusted: scores 31-36 are sharp for this camera
+
+// Screen detection (Anti-Spoof) — PRIMARY: pre-detection on raw ROI
+static float g_screenConfidence = 0.f;  // 0.0 = real card, 1.0 = definitely screen
+static bool g_isScreenDisplay = false;  // True if screen detected (blocks capture)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TEMPORAL SIDE CLASSIFICATION — Prevents oscillation between FRONT/BACK
+//
+// Problem: When classifier scores are close (front=0.45, back=0.50), the
+// classification flips frame-to-frame. Fix: require N consistent frames
+// before changing the reported side.
+// ══════════════════════════════════════════════════════════════════════════════
+static constexpr int SIDE_HISTORY_SIZE = 5;      // Ring buffer capacity
+static constexpr int SIDE_CONFIRM_COUNT = 3;     // Frames needed to confirm change
+static int g_sideHistory[SIDE_HISTORY_SIZE] = {-1, -1, -1, -1, -1}; // -1=no data, 0=FRONT, 1=BACK, 2=UNKNOWN
+static int g_sideHistoryIdx = 0;                 // Current write position
+static int g_stableSide = -1;                    // Last confirmed stable side (-1=none)
+
+/**
+ * Extract ROI from frame based on overlay config
+ * Returns the region where the card should be placed
+ */
+static cv::Rect getOverlayROI(int frameW, int frameH, CardDetection::CardDetector* detector) {
+    if (!detector) {
+        // Default: center 70% of frame
+        int roiW = static_cast<int>(frameW * 0.70f);
+        int roiH = static_cast<int>(frameH * 0.50f);
+        int roiX = (frameW - roiW) / 2;
+        int roiY = (frameH - roiH) / 2;
+        return cv::Rect(roiX, roiY, roiW, roiH);
+    }
+    
+    auto cfg = detector->getConfig();
+    if (!cfg.overlay.enabled) {
+        // No overlay - use center region
+        int roiW = static_cast<int>(frameW * 0.70f);
+        int roiH = static_cast<int>(frameH * 0.50f);
+        int roiX = (frameW - roiW) / 2;
+        int roiY = (frameH - roiH) / 2;
+        return cv::Rect(roiX, roiY, roiW, roiH);
+    }
+    
+    // Use overlay rectangle (normalized 0-1 coordinates)
+    int roiX = static_cast<int>(cfg.overlay.x * frameW);
+    int roiY = static_cast<int>(cfg.overlay.y * frameH);
+    int roiW = static_cast<int>(cfg.overlay.width * frameW);
+    int roiH = static_cast<int>(cfg.overlay.height * frameH);
+    
+    // Clamp to frame bounds
+    roiX = std::max(0, std::min(roiX, frameW - 10));
+    roiY = std::max(0, std::min(roiY, frameH - 10));
+    roiW = std::max(10, std::min(roiW, frameW - roiX));
+    roiH = std::max(10, std::min(roiH, frameH - roiY));
+    
+    return cv::Rect(roiX, roiY, roiW, roiH);
+}
+
+/**
+ * Calculate blur score using Laplacian variance
+ * Higher score = sharper image, lower score = blurry
+ * For 1000x630 CIN images (observed on device):
+ *   - Very blurry: < 15
+ *   - Slightly blurry: 15-25
+ *   - Acceptable: 25-40
+ *   - Sharp: > 40
+ * @param image Grayscale image to check
+ * @return Laplacian variance (blur score)
+ */
+static float calculateBlurScore(const cv::Mat& image) {
+    if (image.empty()) return 0.f;
+    
+    cv::Mat gray;
+    if (image.channels() == 3) {
+        cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+    } else {
+        gray = image;
+    }
+    
+    cv::Mat laplacian;
+    cv::Laplacian(gray, laplacian, CV_64F);
+    
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(laplacian, mean, stddev);
+    
+    // Variance = stddev^2
+    float variance = static_cast<float>(stddev[0] * stddev[0]);
+    
+    // Log blur score for debugging with more detail
+    LOGI("[BLUR] Score: %.1f (thresh=%.1f) -> %s | Image: %dx%d", 
+         variance, BLUR_THRESHOLD, 
+         (variance < BLUR_THRESHOLD) ? "BLURRY" : "SHARP",
+         image.cols, image.rows);
+    
+    return variance;
+}
+
+// Fill the 26-float result array from a CardDetectionResult
 static void fillResult(float* out, const CardDetection::CardDetectionResult& r) {
     out[0] = r.isValid ? 1.f : 0.f;
     out[1] = r.confidence;
@@ -116,6 +228,12 @@ static void fillResult(float* out, const CardDetection::CardDetectionResult& r) 
     out[21] = g_hasWarpedImage ? 1.f : 0.f;
     out[22] = g_warpedLuminance;
     out[23] = g_warpedGamma;
+    // Blur info (Phase B.5)
+    out[24] = g_blurScore;
+    out[25] = g_isBlurry ? 1.f : 0.f;
+    // Screen detection (Anti-Spoof)
+    out[26] = g_screenConfidence;
+    out[27] = g_isScreenDisplay ? 1.f : 0.f;
 }
 
 extern "C" {
@@ -130,15 +248,33 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeInit(JNIEnv*, jclass) {
         g_warper = std::make_unique<warp::CardWarper>();
         LOGI("CardWarper initialised");
     }
+    if (!g_screenDetector) {
+        g_screenDetector = std::make_unique<validation::ScreenDetector>();
+        LOGI("ScreenDetector initialised (anti-spoof enabled)");
+    }
 }
 
 JNIEXPORT void JNICALL
 Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeRelease(JNIEnv*, jclass) {
     g_detector.reset();
     g_warper.reset();
+    g_screenDetector.reset();
     g_lastWarpedImage.release();
     g_hasWarpedImage = false;
-    LOGI("CardDetector and CardWarper released");
+    g_isScreenDisplay = false;
+    g_screenConfidence = 0.f;
+    LOGI("CardDetector, CardWarper, and ScreenDetector released");
+}
+
+// ── Reset screen detection state (call when user wants to retry) ──
+JNIEXPORT void JNICALL
+Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeResetScreenDetection(JNIEnv*, jclass) {
+    if (g_screenDetector) {
+        g_screenDetector->resetTemporal();
+    }
+    g_isScreenDisplay = false;
+    g_screenConfidence = 0.f;
+    LOGI("Screen detection state reset");
 }
 
 JNIEXPORT void JNICALL
@@ -150,7 +286,10 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeSetConfig(
 {
     if (!g_detector) { LOGE("not initialised"); return; }
 
-    CardDetection::DetectionConfig cfg;
+    // FIX: Get existing config first to preserve all default values
+    // (appearance thresholds, redValidationSoftFail, etc.)
+    CardDetection::DetectionConfig cfg = g_detector->getConfig();
+    
     // cannyLow/High are now adaptive (ignored); blurSize maps to gaussianBlurSize
     (void)cannyLow; (void)cannyHigh;
     cfg.gaussianBlurSize   = (blurSize > 0 && blurSize <= 15) ? blurSize : 5;
@@ -159,7 +298,7 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeSetConfig(
     cfg.targetAspectRatio  = targetRatio;
     cfg.aspectRatioTolerance = ratioTolerance;
     g_detector->setConfig(cfg);
-    LOGI("config updated");
+    LOGI("config updated (preserved existing settings)");
 }
 
 JNIEXPORT void JNICALL
@@ -294,6 +433,85 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeDetectFromYUV(
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PRE-DETECTION SCREEN CHECK (runs BEFORE edge detection)
+    //
+    // Strategy: center-crop the overlay ROI (inner 40%) to analyze mostly
+    // card surface rather than background/hands.  Pass both grayscale (Y)
+    // and chroma (Cr/V) channels for 5-signal analysis.
+    //
+    // IMPORTANT: This does NOT block edge detection.  It only sets the
+    // g_isScreenDisplay flag which the auto-capture gate checks.
+    // Edge detection, warping, and classification always proceed.
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (ENABLE_SCREEN_DETECTION && g_screenDetector) {
+        cv::Rect roi = getOverlayROI(grayRotated.cols, grayRotated.rows, g_detector.get());
+
+        // Validate ROI bounds
+        if (roi.x >= 0 && roi.y >= 0 &&
+            roi.x + roi.width  <= grayRotated.cols &&
+            roi.y + roi.height <= grayRotated.rows &&
+            roi.width > 80 && roi.height > 80) {
+
+            // ── Center-crop: inner 40% of the ROI ────────────────────────
+            // Avoids hands, table edges, and background contamination.
+            int cropW = static_cast<int>(roi.width  * 0.40f);
+            int cropH = static_cast<int>(roi.height * 0.40f);
+            int cropX = roi.x + (roi.width  - cropW) / 2;
+            int cropY = roi.y + (roi.height - cropH) / 2;
+
+            // Clamp to image bounds
+            cropX = std::max(0, std::min(cropX, grayRotated.cols - cropW));
+            cropY = std::max(0, std::min(cropY, grayRotated.rows - cropH));
+            cropW = std::min(cropW, grayRotated.cols - cropX);
+            cropH = std::min(cropH, grayRotated.rows - cropY);
+
+            if (cropW > 40 && cropH > 40) {
+                cv::Mat centerGray = grayRotated(cv::Rect(cropX, cropY, cropW, cropH));
+
+                // ── Build Cr center-crop (half-res → upscale) ────────────
+                cv::Mat centerCr;
+                if (!crRotated.empty()) {
+                    // Cr is half resolution of gray.  Map center-crop coords.
+                    int crX = std::max(0, cropX / 2);
+                    int crY = std::max(0, cropY / 2);
+                    int crW = std::min(cropW / 2, crRotated.cols - crX);
+                    int crH = std::min(cropH / 2, crRotated.rows - crY);
+
+                    if (crW > 10 && crH > 10) {
+                        cv::Mat crRoi = crRotated(cv::Rect(crX, crY, crW, crH));
+                        // Upscale to match centerGray for consistent analysis
+                        cv::resize(crRoi, centerCr,
+                                   cv::Size(cropW, cropH),
+                                   0, 0, cv::INTER_LINEAR);
+                    }
+                }
+
+                // ── Run 5-signal pre-detection ───────────────────────────
+                auto frameResult = g_screenDetector->preDetect(centerGray, centerCr);
+
+                // ── Temporal accumulation ─────────────────────────────────
+                auto verdict = g_screenDetector->accumulate(frameResult);
+
+                // Set flags for auto-capture gate (does NOT block detection)
+                if (verdict.decided && verdict.isScreen) {
+                    g_isScreenDisplay = true;
+                    g_screenConfidence = verdict.avgConfidence;
+                    LOGI("[PRE-DETECT] Screen flagged! conf=%.2f susp=%d/%d",
+                         verdict.avgConfidence, verdict.suspiciousCount,
+                         verdict.windowSize);
+                } else if (verdict.decided && !verdict.isScreen) {
+                    g_isScreenDisplay = false;
+                    g_screenConfidence = 0.f;
+                } else {
+                    // Undecided — assume real until proven
+                    g_isScreenDisplay = false;
+                    g_screenConfidence = verdict.avgConfidence;
+                }
+            }
+        }
+    }
+
     // ── Run detection (pass gray directly — no BGR conversion needed) ──
     g_detector->setCrMat(crRotated);
     auto result = g_detector->detectCard(grayRotated);
@@ -319,6 +537,13 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeDetectFromYUV(
             g_warpedLuminance = warpResult.meanLuminance;
             g_warpedGamma = warpResult.gammaUsed;
             
+            // Calculate blur score on warped image (Phase B.5)
+            g_blurScore = calculateBlurScore(g_lastWarpedImage);
+            g_isBlurry = (g_blurScore < BLUR_THRESHOLD);
+            
+            // Screen detection is handled PRE-DETECTION (above).
+            // g_isScreenDisplay / g_screenConfidence are already set.
+
             // Store raw gray + quad for Phase 4 presence validation
             g_lastRawGray = grayRotated.clone();
             g_lastQuadCorners = quadPoints;
@@ -335,6 +560,13 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeDetectFromYUV(
         g_warpedLuminance = 0.f;
         g_warpedGamma = 1.f;
         g_hasQuadCorners = false;
+        g_blurScore = 0.f;
+        g_isBlurry = false;
+
+        // Reset screen temporal when detection is lost for a fresh start
+        if (g_screenDetector && !g_isScreenDisplay) {
+            g_screenDetector->resetTemporal();
+        }
     }
     
     fillResult(data, result);
@@ -514,8 +746,60 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeClassifyCardSide(JNIEnv* e
     validation::SideClassificationResult result = 
         g_sideClassifier->classifyWithDetails(g_lastWarpedImage);
     
+    // ── Temporal smoothing: prevent frame-to-frame oscillation ──────────
+    int rawSide = static_cast<int>(result.side);  // 0=FRONT, 1=BACK, 2=UNKNOWN
+    
+    // Push into ring buffer
+    g_sideHistory[g_sideHistoryIdx] = rawSide;
+    g_sideHistoryIdx = (g_sideHistoryIdx + 1) % SIDE_HISTORY_SIZE;
+    
+    // Count occurrences of each side in the buffer
+    int counts[3] = {0, 0, 0};  // FRONT, BACK, UNKNOWN
+    int validFrames = 0;
+    for (int i = 0; i < SIDE_HISTORY_SIZE; i++) {
+        int s = g_sideHistory[i];
+        if (s >= 0 && s <= 2) {
+            counts[s]++;
+            validFrames++;
+        }
+    }
+    
+    // Find which side has the most votes
+    int bestSide = -1;
+    int bestCount = 0;
+    for (int s = 0; s < 3; s++) {
+        if (counts[s] > bestCount) {
+            bestCount = counts[s];
+            bestSide = s;
+        }
+    }
+    
+    // Only change reported side if N+ frames agree
+    int smoothedSide = rawSide;
+    if (validFrames >= SIDE_CONFIRM_COUNT) {
+        if (bestCount >= SIDE_CONFIRM_COUNT) {
+            // Consensus reached — update stable side
+            g_stableSide = bestSide;
+            smoothedSide = bestSide;
+        } else if (g_stableSide >= 0) {
+            // No consensus — hold previous stable side
+            smoothedSide = g_stableSide;
+        }
+    } else if (g_stableSide >= 0) {
+        // Not enough frames yet — hold previous stable
+        smoothedSide = g_stableSide;
+    }
+    
+    if (smoothedSide != rawSide) {
+        LOGI("SideSmooth: raw=%d smoothed=%d (votes: F=%d B=%d U=%d)",
+             rawSide, smoothedSide, counts[0], counts[1], counts[2]);
+    }
+    
+    // Use smoothed side for the reported result
+    validation::CardSide reportedSide = static_cast<validation::CardSide>(smoothedSide);
+    
     // Pack result into float array
-    data[0] = static_cast<float>(static_cast<int>(result.side));  // 0=FRONT, 1=BACK, 2=UNKNOWN
+    data[0] = static_cast<float>(smoothedSide);  // 0=FRONT, 1=BACK, 2=UNKNOWN
     data[1] = result.confidence;
     data[2] = result.flagDetected ? 1.f : 0.f;
     data[3] = result.flagRedRatio;
@@ -530,10 +814,10 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeClassifyCardSide(JNIEnv* e
     data[12] = result.mrzDetected ? 1.f : 0.f;
     data[13] = result.mrzEdgeDensity;
     
-    LOGI("Classification result: side=%s confidence=%.2f mrz=%s",
+    LOGI("Classification result: side=%s(raw=%s) confidence=%.2f",
+         validation::CardSideClassifier::sideToString(reportedSide),
          validation::CardSideClassifier::sideToString(result.side),
-         result.confidence,
-         result.mrzDetected ? "YES" : "no");
+         result.confidence);
     
     env->SetFloatArrayRegion(jresult, 0, CLASSIFY_RESULT_LEN, data);
     return jresult;
@@ -768,6 +1052,11 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeResetCaptureSequence(JNIEn
     g_hasCapturedFront = false;
     g_hasCapturedBack = false;
 
+    // Reset side classification history
+    for (int i = 0; i < SIDE_HISTORY_SIZE; i++) g_sideHistory[i] = -1;
+    g_sideHistoryIdx = 0;
+    g_stableSide = -1;
+
     // Reset detector to FRONT mode (requires red flag)
     if (g_detector) {
         CardDetection::DetectionConfig cfg = g_detector->getConfig();
@@ -805,6 +1094,17 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeAutoCapture(
 
     bool captured = false;
 
+    // ── SCREEN GATE: Block capture if screen detected ─────────────────
+    if (g_isScreenDisplay) {
+        LOGI(">>> AUTO-CAPTURE: BLOCKED — screen detected (conf=%.2f)", g_screenConfidence);
+        data[0] = 0.f; // captured = false
+        data[1] = static_cast<float>(static_cast<int>(g_captureState));
+        data[2] = g_hasCapturedFront ? 1.f : 0.f;
+        data[3] = g_hasCapturedBack  ? 1.f : 0.f;
+        env->SetFloatArrayRegion(jresult, 0, AUTOCAP_RESULT_LEN, data);
+        return jresult;
+    }
+
     // Only proceed if layout is valid
     if (layoutValid == 1 && g_hasWarpedImage && !g_lastWarpedImage.empty()) {
 
@@ -835,6 +1135,11 @@ Java_com_pfeprojet_carddetector_CardDetectorJNI_nativeAutoCapture(
             // Clear current detection state to force re-detection of back side
             g_hasWarpedImage = false;
             g_hasQuadCorners = false;
+
+            // Reset side classification history for fresh BACK detection
+            for (int i = 0; i < SIDE_HISTORY_SIZE; i++) g_sideHistory[i] = -1;
+            g_sideHistoryIdx = 0;
+            g_stableSide = -1;
         }
         // STATE: WAIT_BACK — expect BACK side (detectedSide == 1)
         else if (g_captureState == CaptureState::WAIT_BACK && detectedSide == 1) {

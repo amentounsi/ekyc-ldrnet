@@ -240,4 +240,15 @@ public class CardDetectorJNI {
      * @return RGBA byte array (1000x630x4 bytes) or null if not captured
      */
     public static native byte[] nativeGetCapturedBack();
+
+    // ═══════════════════════════════════════════════════════════════
+    // ANTI-SPOOF: Screen Detection
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Reset screen detection state.
+     * Call when user wants to retry after screen detection blocked them.
+     * Clears temporal accumulation and allows fresh detection.
+     */
+    public static native void nativeResetScreenDetection();
 }

@@ -1,10 +1,35 @@
 # ninja log v5
-12	882	7937714443194978	CMakeFiles/carddetector.dir/CardDetectorJNI.cpp.o	e5885b7cc42b6c5c
-2	1258	7937714446941001	CMakeFiles/carddetector.dir/CardDetector.cpp.o	ba1763cf0d6a970b
-1258	2187	7937714456115886	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86_64/libcarddetector.so	3e6c2d1d40483768
-4	894	7937721511807241	CMakeFiles/carddetector.dir/CardDetectorJNI.cpp.o	e5885b7cc42b6c5c
-18	1749	7937721520049417	CMakeFiles/carddetector.dir/CardDetector.cpp.o	ba1763cf0d6a970b
-1749	2174	7937721524290697	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86_64/libcarddetector.so	3e6c2d1d40483768
-3	862	7937727371352378	CMakeFiles/carddetector.dir/CardDetectorJNI.cpp.o	e5885b7cc42b6c5c
-12	1417	7937727376562644	CMakeFiles/carddetector.dir/CardDetector.cpp.o	ba1763cf0d6a970b
-1429	1825	7937727380467483	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86_64/libcarddetector.so	3e6c2d1d40483768
+17	1022	7965526916911193	CMakeFiles/carddetector.dir/validation/CardSideClassifier.cpp.o	e9a2c2953795c3c6
+1	1080	7965526917443198	CMakeFiles/carddetector.dir/validation/OfficialCINValidator.cpp.o	922346d35a4e596e
+9	1195	7965526918656493	CMakeFiles/carddetector.dir/warp/CardWarper.cpp.o	6901793bdb2b7cb5
+41	1341	7965526919806509	CMakeFiles/carddetector.dir/CardDetectorJNI.cpp.o	58729f76b1c2e273
+25	1364	7965526920209748	CMakeFiles/carddetector.dir/validation/LivePresenceValidator.cpp.o	761a6b00944cbba5
+33	1480	7965526921136819	CMakeFiles/carddetector.dir/CardDetector.cpp.o	9fbb06182d0f0bcd
+1480	1801	7965526924299414	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86_64/libcarddetector.so	798924441b3c036f
+3	999	7965952103401217	CMakeFiles/carddetector.dir/CardDetectorJNI.cpp.o	58729f76b1c2e273
+11	1249	7965952105782374	CMakeFiles/carddetector.dir/CardDetector.cpp.o	9fbb06182d0f0bcd
+1250	2231	7965952115525618	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86_64/libcarddetector.so	798924441b3c036f
+4	948	7965955729157204	CMakeFiles/carddetector.dir/CardDetectorJNI.cpp.o	58729f76b1c2e273
+16	1168	7965955731324911	CMakeFiles/carddetector.dir/CardDetector.cpp.o	9fbb06182d0f0bcd
+1169	1451	7965955733870834	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86_64/libcarddetector.so	798924441b3c036f
+3	1389	7966197934654759	CMakeFiles/carddetector.dir/CardDetector.cpp.o	9fbb06182d0f0bcd
+1389	1758	7966197938053486	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86_64/libcarddetector.so	798924441b3c036f
+13	1406	7966203751768306	CMakeFiles/carddetector.dir/CardDetector.cpp.o	9fbb06182d0f0bcd
+3	1412	7966203751704759	CMakeFiles/carddetector.dir/CardDetectorJNI.cpp.o	58729f76b1c2e273
+1416	1858	7966203756106626	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86_64/libcarddetector.so	798924441b3c036f
+1	17	0	clean	2fbcb0ab13b85222
+3	1150	7966244575179419	CMakeFiles/carddetector.dir/validation/CardSideClassifier.cpp.o	e9a2c2953795c3c6
+17	1200	7966244575645758	CMakeFiles/carddetector.dir/validation/OfficialCINValidator.cpp.o	922346d35a4e596e
+10	1310	7966244576708683	CMakeFiles/carddetector.dir/warp/CardWarper.cpp.o	6901793bdb2b7cb5
+40	1347	7966244577058403	CMakeFiles/carddetector.dir/CardDetectorJNI.cpp.o	58729f76b1c2e273
+25	1476	7966244578237354	CMakeFiles/carddetector.dir/validation/LivePresenceValidator.cpp.o	761a6b00944cbba5
+33	1590	7966244579478692	CMakeFiles/carddetector.dir/CardDetector.cpp.o	9fbb06182d0f0bcd
+1590	1892	7966244582188697	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86_64/libcarddetector.so	798924441b3c036f
+0	13	0	clean	2fbcb0ab13b85222
+3	1035	7966252510762049	CMakeFiles/carddetector.dir/validation/CardSideClassifier.cpp.o	e9a2c2953795c3c6
+12	1098	7966252511351860	CMakeFiles/carddetector.dir/validation/OfficialCINValidator.cpp.o	922346d35a4e596e
+19	1201	7966252512291908	CMakeFiles/carddetector.dir/warp/CardWarper.cpp.o	6901793bdb2b7cb5
+42	1202	7966252512327078	CMakeFiles/carddetector.dir/CardDetectorJNI.cpp.o	58729f76b1c2e273
+28	1323	7966252513519385	CMakeFiles/carddetector.dir/validation/LivePresenceValidator.cpp.o	761a6b00944cbba5
+35	1503	7966252515320880	CMakeFiles/carddetector.dir/CardDetector.cpp.o	9fbb06182d0f0bcd
+1503	1813	7966252518079378	C:/Users/USER/Desktop/PFE projet/android/app/build/intermediates/cxx/Debug/4gj606r4/obj/x86_64/libcarddetector.so	798924441b3c036f
