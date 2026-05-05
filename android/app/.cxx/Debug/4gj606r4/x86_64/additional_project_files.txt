@@ -1,6 +1,0 @@
-C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\CardDetector.h
-C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\warp\CardWarper.h
-C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\validation\CardSideClassifier.h
-C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\validation\OfficialCINValidator.h
-C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\validation\LivePresenceValidator.h
-C:\Users\USER\Desktop\PFE projet\android\app\src\main\cpp\validation\ScreenDetector.h

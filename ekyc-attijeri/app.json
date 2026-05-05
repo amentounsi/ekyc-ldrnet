@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "AttijariEKYC",
+    "slug": "AttijariEKYC",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F0D0A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.attijari.ekyc",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Pour trouver les agences Attijari proches de vous."
+      },
+      "config": {
+        "googleMapsApiKey": "OPTIONNEL_SI_TU_VEUX_GOOGLE_MAPS"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F0D0A"
+      },
+      "package": "com.attijari.ekyc",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "FOREGROUND_SERVICE"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "OPTIONNEL_SI_TU_VEUX_GOOGLE_MAPS"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Attijari Bank a besoin de votre position pour trouver les agences proches."
+        }
+      ]
+    ]
+  }
+}

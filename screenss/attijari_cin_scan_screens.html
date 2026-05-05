@@ -1,0 +1,1202 @@
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body, .widget-root { font-family: 'DM Sans', sans-serif; background: #f0f0ec; }
+
+  :root {
+    --att-red: #CC1B2B;
+    --att-dark: #1A1A2E;
+    --att-gold: #C8963C;
+    --att-light-red: #F5E6E8;
+    --att-mid-red: #E8818A;
+    --att-bg: #F7F6F2;
+    --att-surface: #FFFFFF;
+    --att-border: #E5E2DA;
+    --att-text: #1A1A2E;
+    --att-muted: #6B6B7A;
+    --att-green: #1A7A4A;
+    --att-amber: #C8963C;
+    --success-bg: #E8F5EE;
+    --error-bg: #FBE9EB;
+    --warn-bg: #FEF5E7;
+    --radius-sm: 8px;
+    --radius-md: 14px;
+    --radius-lg: 22px;
+    --radius-xl: 30px;
+  }
+
+  .screens-wrapper {
+    padding: 20px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    background: #EEEDE8;
+    min-height: 100vh;
+  }
+
+  .screen-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--att-muted);
+    text-align: center;
+    margin-bottom: 8px;
+  }
+
+  .phone-frame {
+    width: 100%;
+    max-width: 360px;
+    margin: 0 auto;
+    background: var(--att-dark);
+    border-radius: 36px;
+    padding: 3px;
+    box-shadow: 0 20px 60px rgba(26,26,46,0.25), 0 4px 12px rgba(26,26,46,0.15);
+  }
+
+  .phone-inner {
+    background: var(--att-bg);
+    border-radius: 34px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .status-bar {
+    height: 44px;
+    background: var(--att-red);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+  }
+
+  .status-time {
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+    letter-spacing: 0.3px;
+  }
+
+  .status-icons {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+  }
+
+  .status-icon {
+    width: 14px;
+    height: 8px;
+    background: white;
+    border-radius: 1px;
+    opacity: 0.9;
+  }
+
+  .nav-header {
+    background: var(--att-red);
+    padding: 0 20px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .nav-back {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .nav-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: white;
+    letter-spacing: 0.2px;
+  }
+
+  .att-logo {
+    margin-left: auto;
+    width: 28px;
+    height: 28px;
+  }
+
+  .screen-body {
+    padding: 20px 18px;
+    background: var(--att-bg);
+    min-height: 580px;
+  }
+
+  .progress-bar-container {
+    margin-bottom: 20px;
+  }
+
+  .progress-steps {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .step-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--att-border);
+  }
+  .step-dot.active { background: var(--att-red); width: 24px; border-radius: 4px; }
+  .step-dot.done { background: var(--att-green); }
+
+  .step-label {
+    font-size: 11px;
+    color: var(--att-muted);
+    margin-left: auto;
+  }
+
+  .scan-instruction {
+    font-size: 13px;
+    color: var(--att-muted);
+    text-align: center;
+    margin-bottom: 16px;
+    line-height: 1.5;
+  }
+
+  .scan-area {
+    background: var(--att-dark);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    position: relative;
+    margin-bottom: 16px;
+    overflow: hidden;
+    aspect-ratio: 1.4;
+  }
+
+  .scan-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .card-frame {
+    width: 88%;
+    height: 80%;
+    position: relative;
+    border-radius: 8px;
+  }
+
+  .corner {
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border-color: var(--att-gold);
+    border-style: solid;
+  }
+  .corner.tl { top: 0; left: 0; border-width: 3px 0 0 3px; border-radius: 5px 0 0 0; }
+  .corner.tr { top: 0; right: 0; border-width: 3px 3px 0 0; border-radius: 0 5px 0 0; }
+  .corner.bl { bottom: 0; left: 0; border-width: 0 0 3px 3px; border-radius: 0 0 0 5px; }
+  .corner.br { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-radius: 0 0 5px 0; }
+
+  .scan-line {
+    position: absolute;
+    left: 4%;
+    right: 4%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--att-gold), transparent);
+    top: 30%;
+    animation: scanMove 2s ease-in-out infinite;
+    border-radius: 1px;
+  }
+
+  @keyframes scanMove {
+    0%, 100% { top: 15%; opacity: 0.4; }
+    50% { top: 75%; opacity: 1; }
+  }
+
+  .card-placeholder {
+    position: absolute;
+    inset: 12px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed rgba(255,255,255,0.15);
+  }
+
+  .card-icon {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    opacity: 0.5;
+  }
+
+  .quality-badge {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(26,26,46,0.9);
+    border-radius: 20px;
+    padding: 5px 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  .quality-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+  .quality-dot.red { background: var(--att-red); animation: blink 1s infinite; }
+  .quality-dot.yellow { background: var(--att-gold); }
+  .quality-dot.green { background: #2ECC71; }
+
+  @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+  .quality-text {
+    font-size: 10px;
+    color: white;
+    font-weight: 500;
+  }
+
+  .hint-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .hint-chip {
+    flex: 1;
+    background: white;
+    border: 0.5px solid var(--att-border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .hint-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .hint-icon.light { background: #FEF5E7; }
+  .hint-icon.flat { background: var(--att-light-red); }
+  .hint-icon.still { background: #E8F5EE; }
+
+  .hint-text {
+    font-size: 10px;
+    color: var(--att-text);
+    font-weight: 500;
+    line-height: 1.3;
+  }
+
+  .capture-btn {
+    width: 100%;
+    height: 52px;
+    background: var(--att-red);
+    border: none;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .capture-btn-text {
+    font-size: 15px;
+    font-weight: 600;
+    color: white;
+    letter-spacing: 0.2px;
+  }
+
+  .capture-btn-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .section-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--att-text);
+    margin-bottom: 4px;
+    letter-spacing: -0.3px;
+  }
+
+  .section-sub {
+    font-size: 13px;
+    color: var(--att-muted);
+    margin-bottom: 20px;
+    line-height: 1.5;
+  }
+
+  .error-card {
+    background: var(--error-bg);
+    border: 0.5px solid #E8818A;
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .warn-card {
+    background: var(--warn-bg);
+    border: 0.5px solid #E8C56A;
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .err-icon-wrap {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--att-red);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .warn-icon-wrap {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--att-gold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .err-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #A32D2D;
+    margin-bottom: 2px;
+  }
+  .err-msg { font-size: 11px; color: #7A2020; line-height: 1.5; }
+
+  .warn-title { font-size: 13px; font-weight: 600; color: #7A5410; margin-bottom: 2px; }
+  .warn-msg { font-size: 11px; color: #7A5410; line-height: 1.5; }
+
+  .retry-btn {
+    width: 100%;
+    height: 44px;
+    border: 1.5px solid var(--att-red);
+    border-radius: var(--radius-md);
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    margin-top: 12px;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .retry-btn-text { font-size: 14px; font-weight: 600; color: var(--att-red); }
+
+  .loading-screen .screen-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 580px;
+    gap: 20px;
+  }
+
+  .spinner-ring {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    border: 3px solid var(--att-light-red);
+    border-top-color: var(--att-red);
+    animation: spin 0.9s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .spinner-label {
+    font-size: 14px;
+    color: var(--att-text);
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  .loading-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .loading-dot {
+    width: 7px;
+    height: 7px;
+    background: var(--att-red);
+    border-radius: 50%;
+    animation: dotBounce 1.2s ease infinite;
+  }
+  .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+  .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes dotBounce { 0%,80%,100% { transform: scale(0.7); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
+
+  .loading-step-list {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .loading-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: white;
+    border-radius: var(--radius-sm);
+    border: 0.5px solid var(--att-border);
+  }
+
+  .lstep-check {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--att-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .lstep-check.done { background: var(--att-green); border-color: var(--att-green); }
+  .lstep-check.active { border-color: var(--att-red); border-width: 2px; }
+
+  .lstep-text { font-size: 12px; color: var(--att-text); font-weight: 500; }
+  .lstep-text.muted { color: var(--att-muted); font-weight: 400; }
+
+  .result-screen .screen-body {
+    padding: 18px;
+  }
+
+  .success-banner {
+    background: var(--att-green);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .success-icon-wrap {
+    width: 34px;
+    height: 34px;
+    background: rgba(255,255,255,0.25);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .success-text-main { font-size: 14px; font-weight: 600; color: white; }
+  .success-text-sub { font-size: 11px; color: rgba(255,255,255,0.8); margin-top: 1px; }
+
+  .cin-images-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .cin-img-card {
+    flex: 1;
+    background: white;
+    border-radius: var(--radius-md);
+    border: 0.5px solid var(--att-border);
+    overflow: hidden;
+  }
+
+  .cin-img-label {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--att-muted);
+    padding: 7px 10px 4px;
+  }
+
+  .cin-img-placeholder {
+    height: 72px;
+    background: var(--att-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 8px 8px;
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cin-mock-card {
+    width: 80%;
+    height: 70%;
+    border-radius: 4px;
+    background: linear-gradient(135deg, #CC1B2B 0%, #8B1520 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .cin-mock-stripe {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 35%;
+    height: 100%;
+    background: var(--att-gold);
+    opacity: 0.2;
+    border-radius: 0 4px 4px 0;
+  }
+
+  .cin-mock-text {
+    font-size: 7px;
+    color: rgba(255,255,255,0.7);
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    z-index: 1;
+  }
+
+  .face-card {
+    background: white;
+    border-radius: var(--radius-md);
+    border: 0.5px solid var(--att-border);
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .face-circle {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--att-bg);
+    border: 2.5px solid var(--att-gold);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .face-info { flex: 1; }
+  .face-name { font-size: 14px; font-weight: 600; color: var(--att-text); margin-bottom: 3px; }
+  .face-label { font-size: 11px; color: var(--att-muted); margin-bottom: 1px; }
+
+  .data-grid {
+    background: white;
+    border-radius: var(--radius-md);
+    border: 0.5px solid var(--att-border);
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+
+  .data-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 0.5px solid var(--att-border);
+  }
+
+  .data-row:last-child { border-bottom: none; }
+  .data-key { font-size: 12px; color: var(--att-muted); }
+  .data-val { font-size: 12px; font-weight: 600; color: var(--att-text); }
+
+  .confirm-btn {
+    width: 100%;
+    height: 52px;
+    background: var(--att-red);
+    border: none;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    margin-bottom: 10px;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .confirm-btn-text { font-size: 15px; font-weight: 600; color: white; }
+
+  .barcode-zone {
+    position: absolute;
+    bottom: 20%;
+    left: 10%;
+    right: 10%;
+    height: 18%;
+    border: 1.5px dashed rgba(200,150,60,0.7);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .barcode-label-badge {
+    background: rgba(200,150,60,0.15);
+    border-radius: 3px;
+    padding: 2px 8px;
+  }
+
+  .barcode-label-text {
+    font-size: 8px;
+    color: var(--att-gold);
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
+
+  .barcode-lines {
+    display: flex;
+    gap: 2px;
+    height: 20px;
+    align-items: center;
+  }
+  .barcode-line {
+    width: 2px;
+    background: rgba(200,150,60,0.6);
+    border-radius: 1px;
+  }
+
+  .timeout-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(26,26,46,0.88);
+    border-radius: 34px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 28px;
+  }
+
+  .timeout-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(204,27,43,0.3);
+    border: 2px solid var(--att-red);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .timeout-title { font-size: 18px; font-weight: 700; color: white; text-align: center; }
+  .timeout-msg { font-size: 13px; color: rgba(255,255,255,0.7); text-align: center; line-height: 1.6; }
+
+  .timeout-tips {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .timeout-tip {
+    background: rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .tip-bullet {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--att-gold);
+    flex-shrink: 0;
+  }
+
+  .tip-text { font-size: 11px; color: rgba(255,255,255,0.85); }
+
+  .timeout-btn {
+    width: 100%;
+    height: 46px;
+    background: var(--att-red);
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+    margin-top: 4px;
+  }
+
+  .nav-notch {
+    background: var(--att-dark);
+    width: 80px;
+    height: 5px;
+    border-radius: 3px;
+    margin: 8px auto 6px;
+  }
+
+  .att-header-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 20px 18px;
+    background: var(--att-red);
+  }
+
+  .att-logo-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .att-logo-letter {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--att-red);
+    font-family: 'DM Serif Display', serif;
+  }
+
+  .att-header-title-block {}
+  .att-header-title { font-size: 13px; font-weight: 600; color: white; }
+  .att-header-sub { font-size: 10px; color: rgba(255,255,255,0.7); }
+
+  .step-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    background: white;
+    border-bottom: 0.5px solid var(--att-border);
+  }
+
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .step-num {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .step-num.active { background: var(--att-red); color: white; }
+  .step-num.done { background: var(--att-green); color: white; }
+  .step-num.pending { background: var(--att-border); color: var(--att-muted); }
+
+  .step-name { font-size: 10px; font-weight: 500; color: var(--att-muted); }
+  .step-name.active { color: var(--att-red); }
+  .step-name.done { color: var(--att-green); }
+
+  .step-line {
+    flex: 1;
+    height: 1px;
+    background: var(--att-border);
+  }
+
+  .barcode-hint-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(200,150,60,0.1);
+    border: 0.5px solid rgba(200,150,60,0.4);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 14px;
+  }
+
+  .barcode-hint-text { font-size: 11px; color: #7A5410; font-weight: 500; }
+
+  .att-watermark {
+    font-size: 9px;
+    color: rgba(255,255,255,0.3);
+    text-align: center;
+    padding-bottom: 10px;
+    background: var(--att-red);
+    letter-spacing: 1.5px;
+    font-weight: 500;
+  }
+</style>
+
+<div class="screens-wrapper">
+
+  <!-- SCREEN 3: Loading / Processing -->
+  <div>
+    <div class="screen-label">Écran 3 — Analyse en cours</div>
+    <div class="phone-frame">
+      <div class="phone-inner">
+        <div class="status-bar">
+          <span class="status-time">9:44</span>
+          <div class="status-icons">
+            <div class="status-icon" style="width:10px;height:8px;border-radius:2px;background:white;"></div>
+            <div class="status-icon" style="width:8px;height:8px;border-radius:50%;"></div>
+            <div class="status-icon" style="width:14px;height:8px;border-radius:1px;"></div>
+          </div>
+        </div>
+        <div class="att-header-logo">
+          <div class="att-logo-circle">
+            <span class="att-logo-letter">A</span>
+          </div>
+          <div class="att-header-title-block">
+            <div class="att-header-title">Analyse en cours...</div>
+            <div class="att-header-sub">Traitement de votre CIN</div>
+          </div>
+        </div>
+        <div class="loading-screen">
+          <div class="screen-body" style="padding-top:28px;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:16px;margin-bottom:28px;">
+              <div style="position:relative;width:80px;height:80px;display:flex;align-items:center;justify-content:center;">
+                <div class="spinner-ring" style="position:absolute;inset:0;width:auto;height:auto;"></div>
+                <div class="att-logo-circle" style="width:48px;height:48px;">
+                  <span class="att-logo-letter" style="font-size:18px;">A</span>
+                </div>
+              </div>
+              <div style="text-align:center;">
+                <div class="section-title" style="font-size:17px;margin-bottom:4px;">Analyse de votre CIN</div>
+                <div class="section-sub" style="margin-bottom:0;">Veuillez patienter quelques instants...</div>
+              </div>
+              <div class="loading-dots">
+                <div class="loading-dot"></div>
+                <div class="loading-dot"></div>
+                <div class="loading-dot"></div>
+              </div>
+            </div>
+
+            <div class="loading-step-list">
+              <div class="loading-step">
+                <div class="lstep-check done">
+                  <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5l2.5 2.5 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                </div>
+                <span class="lstep-text">Capture recto validée</span>
+                <span style="margin-left:auto;font-size:10px;color:var(--att-green);font-weight:600;">✓ OK</span>
+              </div>
+              <div class="loading-step">
+                <div class="lstep-check done">
+                  <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5l2.5 2.5 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                </div>
+                <span class="lstep-text">Capture verso validée</span>
+                <span style="margin-left:auto;font-size:10px;color:var(--att-green);font-weight:600;">✓ OK</span>
+              </div>
+              <div class="loading-step" style="border:0.5px solid var(--att-red);">
+                <div class="lstep-check active">
+                  <div style="width:10px;height:10px;border-radius:50%;border:2px solid var(--att-red);border-top-color:transparent;animation:spin 0.8s linear infinite;"></div>
+                </div>
+                <span class="lstep-text">Lecture code-barres PDF417...</span>
+                <span style="margin-left:auto;font-size:10px;color:var(--att-red);font-weight:500;">En cours</span>
+              </div>
+              <div class="loading-step" style="opacity:0.5;">
+                <div class="lstep-check pending"></div>
+                <span class="lstep-text muted">Extraction photo visage</span>
+              </div>
+              <div class="loading-step" style="opacity:0.5;">
+                <div class="lstep-check pending"></div>
+                <span class="lstep-text muted">Vérification des données</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="nav-notch"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCREEN 4: Error States -->
+  <div>
+    <div class="screen-label">Écran 4 — Messages d'erreur</div>
+    <div class="phone-frame">
+      <div class="phone-inner">
+        <div class="status-bar">
+          <span class="status-time">9:45</span>
+          <div class="status-icons">
+            <div class="status-icon" style="width:10px;height:8px;border-radius:2px;background:white;"></div>
+            <div class="status-icon" style="width:8px;height:8px;border-radius:50%;"></div>
+            <div class="status-icon" style="width:14px;height:8px;border-radius:1px;"></div>
+          </div>
+        </div>
+        <div class="att-header-logo">
+          <div class="att-logo-circle">
+            <span class="att-logo-letter">A</span>
+          </div>
+          <div class="att-header-title-block">
+            <div class="att-header-title">Problème détecté</div>
+            <div class="att-header-sub">Veuillez réessayer</div>
+          </div>
+        </div>
+        <div class="screen-body" style="padding-top:16px;">
+          <div class="error-card">
+            <div class="err-icon-wrap">
+              <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 4v4M7 9.5v1" stroke="white" stroke-width="1.5" stroke-linecap="round"/><circle cx="7" cy="7" r="6" stroke="white" stroke-width="1.2" fill="none"/></svg>
+            </div>
+            <div>
+              <div class="err-title">Code-barres non détecté</div>
+              <div class="err-msg">Le code-barres au verso n'a pas pu être lu. Assurez-vous qu'il est visible, bien éclairé et non endommagé.</div>
+            </div>
+          </div>
+
+          <div class="error-card">
+            <div class="err-icon-wrap">
+              <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 4v4M7 9.5v1" stroke="white" stroke-width="1.5" stroke-linecap="round"/><circle cx="7" cy="7" r="6" stroke="white" stroke-width="1.2" fill="none"/></svg>
+            </div>
+            <div>
+              <div class="err-title">Image floue</div>
+              <div class="err-msg">Qualité insuffisante (score: 0.42). Maintenez la carte immobile et réessayez.</div>
+            </div>
+          </div>
+
+          <div class="warn-card">
+            <div class="warn-icon-wrap">
+              <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 3.5l5.5 9H1.5L7 3.5z" stroke="white" stroke-width="1" fill="none"/><path d="M7 7v2.5M7 10.5v0.5" stroke="white" stroke-width="1.3" stroke-linecap="round"/></svg>
+            </div>
+            <div>
+              <div class="warn-title">Éclairage insuffisant</div>
+              <div class="err-msg" style="color:#7A5410;">Augmentez la luminosité ou déplacez-vous vers une zone mieux éclairée.</div>
+            </div>
+          </div>
+
+          <div class="warn-card">
+            <div class="warn-icon-wrap">
+              <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 3.5l5.5 9H1.5L7 3.5z" stroke="white" stroke-width="1" fill="none"/><path d="M7 7v2.5M7 10.5v0.5" stroke="white" stroke-width="1.3" stroke-linecap="round"/></svg>
+            </div>
+            <div>
+              <div class="warn-title">Disposition invalide</div>
+              <div class="err-msg" style="color:#7A5410;">Layout non conforme. Utilisez uniquement une CIN tunisienne officielle valide.</div>
+            </div>
+          </div>
+
+          <button class="capture-btn" style="margin-top:4px;">
+            <span class="capture-btn-text">Rescanner le verso</span>
+          </button>
+          <button class="retry-btn">
+            <span class="retry-btn-text">Recommencer depuis le début</span>
+          </button>
+        </div>
+        <div class="nav-notch"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCREEN 5: Timeout Popup -->
+  <div>
+    <div class="screen-label">Écran 5 — Timeout / Aucune carte détectée</div>
+    <div class="phone-frame">
+      <div class="phone-inner" style="position:relative;">
+        <div class="status-bar">
+          <span class="status-time">9:46</span>
+          <div class="status-icons">
+            <div class="status-icon" style="width:10px;height:8px;border-radius:2px;background:white;"></div>
+            <div class="status-icon" style="width:8px;height:8px;border-radius:50%;"></div>
+            <div class="status-icon" style="width:14px;height:8px;border-radius:1px;"></div>
+          </div>
+        </div>
+        <div class="att-header-logo">
+          <div class="att-logo-circle">
+            <span class="att-logo-letter">A</span>
+          </div>
+          <div class="att-header-title-block">
+            <div class="att-header-title">Capture recto</div>
+            <div class="att-header-sub">eKYC — Attijari Bank</div>
+          </div>
+        </div>
+        <div class="screen-body" style="padding:0;">
+          <div style="height:560px;background:var(--att-dark);position:relative;border-bottom-left-radius:34px;border-bottom-right-radius:34px;">
+            <div style="position:absolute;inset:0;opacity:0.15;background:repeating-linear-gradient(90deg,rgba(255,255,255,0.03) 0px,rgba(255,255,255,0.03) 1px,transparent 1px,transparent 20px);"></div>
+            <div class="timeout-overlay">
+              <div class="timeout-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 6v6l4 2" stroke="#CC1B2B" stroke-width="2" stroke-linecap="round" fill="none"/><circle cx="12" cy="12" r="10" stroke="#CC1B2B" stroke-width="1.5" fill="none"/></svg>
+              </div>
+              <div class="timeout-title">Aucune carte détectée</div>
+              <div class="timeout-msg">Aucune CIN tunisienne n'a été détectée dans le cadre pendant 5 secondes.</div>
+              <div class="timeout-tips">
+                <div class="timeout-tip">
+                  <div class="tip-bullet"></div>
+                  <span class="tip-text">Tenez la carte horizontalement dans le cadre</span>
+                </div>
+                <div class="timeout-tip">
+                  <div class="tip-bullet"></div>
+                  <span class="tip-text">Assurez-vous d'une bonne luminosité ambiante</span>
+                </div>
+                <div class="timeout-tip">
+                  <div class="tip-bullet"></div>
+                  <span class="tip-text">Utilisez une CIN tunisienne officielle valide</span>
+                </div>
+                <div class="timeout-tip">
+                  <div class="tip-bullet"></div>
+                  <span class="tip-text">Évitez les reflets et les ombres sur la carte</span>
+                </div>
+              </div>
+              <button class="timeout-btn">Réessayer la capture</button>
+              <div style="font-size:11px;color:rgba(255,255,255,0.45);text-align:center;">Contacter le support Attijari</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCREEN 6: Result -->
+  <div>
+    <div class="screen-label">Écran 6 — Résultat &amp; confirmation</div>
+    <div class="phone-frame">
+      <div class="phone-inner">
+        <div class="status-bar">
+          <span class="status-time">9:47</span>
+          <div class="status-icons">
+            <div class="status-icon" style="width:10px;height:8px;border-radius:2px;background:white;"></div>
+            <div class="status-icon" style="width:8px;height:8px;border-radius:50%;"></div>
+            <div class="status-icon" style="width:14px;height:8px;border-radius:1px;"></div>
+          </div>
+        </div>
+        <div class="att-header-logo">
+          <div class="att-logo-circle">
+            <span class="att-logo-letter">A</span>
+          </div>
+          <div class="att-header-title-block">
+            <div class="att-header-title">Scan réussi</div>
+            <div class="att-header-sub">Vérifiez vos informations</div>
+          </div>
+        </div>
+        <div class="step-indicator">
+          <div class="step-item">
+            <div class="step-num done">✓</div>
+            <span class="step-name done">Recto</span>
+          </div>
+          <div class="step-line" style="background:var(--att-green);"></div>
+          <div class="step-item">
+            <div class="step-num done">✓</div>
+            <span class="step-name done">Verso</span>
+          </div>
+          <div class="step-line" style="background:var(--att-green);"></div>
+          <div class="step-item">
+            <div class="step-num active">3</div>
+            <span class="step-name active">Résultat</span>
+          </div>
+        </div>
+        <div class="result-screen screen-body" style="overflow-y:auto;max-height:560px;">
+          <div class="success-banner">
+            <div class="success-icon-wrap">
+              <svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5 7-7" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            </div>
+            <div>
+              <div class="success-text-main">CIN scannée avec succès</div>
+              <div class="success-text-sub">Toutes les données ont été extraites</div>
+            </div>
+          </div>
+
+          <div class="face-card">
+            <div class="face-circle">
+              <svg width="34" height="34" viewBox="0 0 34 34"><circle cx="17" cy="13" r="7" fill="#C8963C" opacity="0.4"/><ellipse cx="17" cy="28" rx="11" ry="8" fill="#C8963C" opacity="0.3"/><circle cx="17" cy="13" r="6" stroke="#C8963C" stroke-width="1.5" fill="none"/></svg>
+            </div>
+            <div class="face-info">
+              <div class="face-name">Mohamed Ben Ali</div>
+              <div class="face-label" style="font-size:10px;color:var(--att-muted);">Photo extraite — Recto CIN</div>
+              <div style="display:inline-flex;align-items:center;gap:4px;background:var(--success-bg);padding:2px 8px;border-radius:4px;margin-top:3px;">
+                <div style="width:5px;height:5px;border-radius:50%;background:var(--att-green);"></div>
+                <span style="font-size:9px;color:var(--att-green);font-weight:600;">Visage détecté</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="font-size:11px;font-weight:600;color:var(--att-muted);letter-spacing:0.8px;text-transform:uppercase;margin-bottom:8px;">Images capturées</div>
+          <div class="cin-images-row">
+            <div class="cin-img-card">
+              <div class="cin-img-label">Recto</div>
+              <div class="cin-img-placeholder">
+                <div class="cin-mock-card">
+                  <div class="cin-mock-stripe"></div>
+                  <span class="cin-mock-text">CIN — RECTO</span>
+                </div>
+              </div>
+            </div>
+            <div class="cin-img-card">
+              <div class="cin-img-label">Verso</div>
+              <div class="cin-img-placeholder">
+                <div class="cin-mock-card" style="background:linear-gradient(135deg,#8B1520 0%,#4A0D14 100%);">
+                  <div class="cin-mock-stripe"></div>
+                  <span class="cin-mock-text">CIN — VERSO</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="font-size:11px;font-weight:600;color:var(--att-muted);letter-spacing:0.8px;text-transform:uppercase;margin-bottom:8px;">Données extraites</div>
+          <div class="data-grid">
+            <div class="data-row">
+              <span class="data-key">N° CIN</span>
+              <span class="data-val">12345678</span>
+            </div>
+            <div class="data-row">
+              <span class="data-key">Date d'émission</span>
+              <span class="data-val">15/03/2019</span>
+            </div>
+            <div class="data-row">
+              <span class="data-key">Format code-barres</span>
+              <span class="data-val">PDF417</span>
+            </div>
+            <div class="data-row">
+              <span class="data-key">Statut vérification</span>
+              <span class="data-val" style="color:var(--att-green);">Validé ✓</span>
+            </div>
+          </div>
+
+          <button class="confirm-btn">
+            <span class="confirm-btn-text">Confirmer et continuer</span>
+            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M6 12l4-4-4-4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          </button>
+          <button class="retry-btn" style="margin-bottom:16px;">
+            <span class="retry-btn-text">Rescanner la CIN</span>
+          </button>
+        </div>
+        <div class="nav-notch"></div>
+      </div>
+    </div>
+  </div>
+
+</div>

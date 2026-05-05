@@ -1,0 +1,54 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# Android build artifacts (native source code IS committed)
+android/.gradle/
+android/build/
+android/app/build/
+android/.cxx/
+android/local.properties
+android/**/*.orig
+
+# OpenCV Android SDK — too large for git (776 MB).
+# Download separately: https://github.com/opencv/opencv/releases/tag/4.10.0
+# Extract to: android/app/src/main/cpp/OpenCV-android-sdk/
+android/app/src/main/cpp/OpenCV-android-sdk/
+
+# Debug images generated during testing
+*_debug.png
+*_debug_*.png

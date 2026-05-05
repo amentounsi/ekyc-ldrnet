@@ -1,0 +1,328 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{--red:#CC1B2B;--gold:#C8963C;--green:#1DB954;}
+body{font-family:'DM Sans',sans-serif;background:#111;padding:12px 8px;display:flex;flex-direction:column;gap:28px;}
+.lbl{font-size:9px;font-weight:600;letter-spacing:1.8px;text-transform:uppercase;color:#444;text-align:center;margin-bottom:6px;}
+.phone{width:100%;max-width:340px;margin:0 auto;background:#0D0D0D;border-radius:40px;padding:3px;box-shadow:0 20px 60px rgba(0,0,0,0.6);}
+.inner{background:#000;border-radius:38px;overflow:hidden;}
+.sbar{height:44px;background:#000;display:flex;align-items:center;justify-content:space-between;padding:0 22px;}
+.sbar-t{font-size:12px;font-weight:600;color:#fff;}
+.hdr{background:var(--red);padding:10px 18px 14px;display:flex;align-items:center;gap:10px;}
+.logo-c{width:30px;height:30px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.logo-l{font-size:12px;font-weight:700;color:var(--red);font-family:Georgia,serif;}
+.hdr-t{font-size:13px;font-weight:600;color:#fff;}
+.hdr-s{font-size:10px;color:rgba(255,255,255,0.6);}
+.steps{display:flex;align-items:center;gap:5px;padding:10px 18px;background:rgba(255,255,255,0.04);}
+.sdot{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0;}
+.sdot.a{background:var(--red);color:#fff;}
+.sdot.d{background:var(--green);color:#fff;}
+.sdot.p{background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.35);}
+.sn{font-size:10px;font-weight:500;color:rgba(255,255,255,0.4);}
+.sn.a{color:#fff;} .sn.d{color:rgba(100,220,150,0.8);}
+.sline{flex:1;height:0.5px;background:rgba(255,255,255,0.1);}
+.sline.d{background:rgba(100,220,150,0.4);}
+.body{background:#000;padding:20px 18px 22px;}
+.ttl{font-size:19px;font-weight:700;color:#fff;margin-bottom:4px;}
+.sub{font-size:13px;color:rgba(255,255,255,0.45);margin-bottom:22px;line-height:1.5;}
+/* Card illustration wrapper */
+.card-wrap{background:#1A1A1A;border-radius:16px;padding:22px 16px;margin-bottom:20px;display:flex;flex-direction:column;align-items:center;gap:14px;}
+/* Checklist */
+.checks{display:flex;flex-direction:column;gap:9px;width:100%;margin-bottom:18px;}
+.check-row{display:flex;align-items:center;gap:10px;}
+.check-ico{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.check-t{font-size:12px;color:rgba(255,255,255,0.7);font-weight:500;}
+/* Flip pill */
+.flip-pill{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.06);border:0.5px solid rgba(255,255,255,0.12);border-radius:20px;padding:7px 16px;}
+.flip-t{font-size:12px;font-weight:600;color:#fff;}
+/* CTA */
+.cta{width:100%;height:50px;background:var(--red);border:none;border-radius:13px;font-size:15px;font-weight:700;color:#fff;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;gap:9px;}
+.notch{background:#0D0D0D;width:72px;height:4px;border-radius:2px;margin:7px auto 6px;}
+</style>
+</head>
+<body>
+
+<!-- ══ SCREEN A: GUIDE RECTO ══ -->
+<div>
+<div class="lbl">Écran Guide — Recto</div>
+<div class="phone"><div class="inner">
+  <div class="sbar">
+    <span class="sbar-t">9:41</span>
+    <span style="font-size:11px;color:rgba(255,255,255,0.4);">●●●</span>
+  </div>
+  <div class="hdr">
+    <div class="logo-c"><span class="logo-l">A</span></div>
+    <div><div class="hdr-t">Vérification d'identité</div><div class="hdr-s">eKYC · Attijari Bank</div></div>
+  </div>
+  <div class="steps">
+    <div class="sdot a">1</div><span class="sn a">Recto</span>
+    <div class="sline"></div>
+    <div class="sdot p">2</div><span class="sn">Verso</span>
+    <div class="sline"></div>
+    <div class="sdot p">3</div><span class="sn">Résultat</span>
+  </div>
+  <div class="body">
+    <div class="ttl">Côté face</div>
+    <div class="sub">Présentez ce côté — avec votre photo, nom et numéro</div>
+
+    <div class="card-wrap">
+      <!-- FLAT ILLUSTRATION: CIN FRONT (inspired by uploaded image) -->
+      <svg width="272" height="178" viewBox="0 0 272 178" xmlns="http://www.w3.org/2000/svg">
+        <!-- Card background -->
+        <rect x="4" y="4" width="264" height="170" rx="16" fill="#D8C8D8" opacity="0.15"/>
+        <rect x="0" y="0" width="264" height="170" rx="16" fill="#C8AEBF"/>
+        <!-- Green valid border (like in reference) -->
+        <rect x="0" y="0" width="264" height="170" rx="16" fill="none" stroke="#1DB954" stroke-width="4"/>
+
+        <!-- ── PHOTO ZONE top-left ── -->
+        <!-- Camera/photo box -->
+        <rect x="14" y="14" width="54" height="44" rx="6" fill="#CC1B2B" opacity="0.85"/>
+        <rect x="18" y="18" width="46" height="36" rx="4" fill="#B01525"/>
+        <circle cx="41" cy="36" r="10" fill="none" stroke="white" stroke-width="2.5"/>
+        <circle cx="41" cy="36" r="4" fill="white"/>
+        <rect x="14" y="8" width="10" height="7" rx="2" fill="#CC1B2B" opacity="0.7"/>
+
+        <!-- Person illustration (cartoon face like reference) -->
+        <!-- Hair -->
+        <ellipse cx="41" cy="90" rx="22" ry="14" fill="#3A3A3A"/>
+        <!-- Face -->
+        <ellipse cx="41" cy="96" rx="18" ry="20" fill="#E8C4A0"/>
+        <!-- Hair top -->
+        <ellipse cx="41" cy="82" rx="22" ry="12" fill="#3A3A3A"/>
+        <!-- Eyes -->
+        <ellipse cx="34" cy="94" rx="3" ry="3.5" fill="#2A2A2A"/>
+        <ellipse cx="48" cy="94" rx="3" ry="3.5" fill="#2A2A2A"/>
+        <circle cx="35" cy="93" r="1" fill="white"/>
+        <circle cx="49" cy="93" r="1" fill="white"/>
+        <!-- Smile -->
+        <path d="M35 103 Q41 108 47 103" fill="none" stroke="#8B6040" stroke-width="1.8" stroke-linecap="round"/>
+        <!-- Neck + body suggestion -->
+        <rect x="35" y="114" width="12" height="10" rx="3" fill="#E8C4A0"/>
+        <path d="M20 140 Q20 124 41 124 Q62 124 62 140" fill="#5A5A7A"/>
+        <!-- Collar -->
+        <path d="M34 124 L41 132 L48 124" fill="none" stroke="white" stroke-width="1.5"/>
+        <!-- Chin line -->
+        <path d="M24 105 Q41 116 58 105" fill="#D4A882" stroke="none"/>
+
+        <!-- ── DATA ZONE right side ── -->
+        <!-- Purple accent bar (like reference) -->
+        <rect x="78" y="20" width="170" height="6" rx="3" fill="#8855BB"/>
+
+        <!-- Name lines -->
+        <rect x="78" y="36" width="140" height="8" rx="3" fill="#4A4A5A"/>
+        <rect x="78" y="52" width="110" height="8" rx="3" fill="#4A4A5A" opacity="0.7"/>
+        <rect x="78" y="68" width="125" height="8" rx="3" fill="#4A4A5A" opacity="0.7"/>
+        <rect x="78" y="84" width="95" height="8" rx="3" fill="#4A4A5A" opacity="0.5"/>
+
+        <!-- CIN number (purple, like reference) -->
+        <rect x="78" y="102" width="90" height="10" rx="3" fill="#8855BB" opacity="0.7"/>
+
+        <!-- ── EMBLEM top-right (shield/badge like reference) ── -->
+        <!-- Gold shield -->
+        <path d="M222 14 Q212 14 212 22 L212 38 Q212 50 222 54 Q232 50 232 38 L232 22 Q232 14 222 14 Z" fill="#C8963C"/>
+        <path d="M222 18 Q214 18 214 24 L214 38 Q214 48 222 51 Q230 48 230 38 L230 24 Q230 18 222 18 Z" fill="#E8B84A"/>
+        <!-- Person icon in shield -->
+        <circle cx="222" cy="28" r="5" fill="#C8963C"/>
+        <path d="M213 42 Q213 35 222 35 Q231 35 231 42" fill="#C8963C"/>
+
+        <!-- ── BOTTOM: CIN number strip ── -->
+        <rect x="0" y="148" width="264" height="22" rx="0" fill="#B09AB0"/>
+        <rect x="0" y="148" width="264" height="22" rx="0" fill="none"/>
+        <path d="M0 148 L264 148 L264 162 Q264 170 248 170 L16 170 Q0 170 0 162 Z" fill="#B09AB0"/>
+        <!-- Number text area -->
+        <rect x="14" y="154" width="120" height="10" rx="3" fill="rgba(0,0,0,0.2)"/>
+        <rect x="14" y="156" width="100" height="6" rx="2" fill="rgba(255,255,255,0.3)"/>
+      </svg>
+
+      <!-- Label below card -->
+      <div class="flip-pill">
+        <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="5" r="3.5" fill="none" stroke="white" stroke-width="1.6"/><path d="M2 14 Q2 10 8 10 Q14 10 14 14" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span class="flip-t">Ce côté avec votre photo</span>
+      </div>
+    </div>
+
+    <div class="checks">
+      <div class="check-row">
+        <div class="check-ico" style="background:rgba(29,185,84,0.15);">
+          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#1DB954" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+        <span class="check-t">Votre photo et visage clairement visibles</span>
+      </div>
+      <div class="check-row">
+        <div class="check-ico" style="background:rgba(29,185,84,0.15);">
+          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#1DB954" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+        <span class="check-t">Nom, prénom et numéro CIN lisibles</span>
+      </div>
+      <div class="check-row">
+        <div class="check-ico" style="background:rgba(204,27,43,0.15);">
+          <svg width="12" height="12" viewBox="0 0 12 12"><line x1="3" y1="3" x2="9" y2="9" stroke="#CC1B2B" stroke-width="1.8" stroke-linecap="round"/><line x1="9" y1="3" x2="3" y2="9" stroke="#CC1B2B" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </div>
+        <span class="check-t">Pas le verso — pas le code-barres</span>
+      </div>
+    </div>
+
+    <button class="cta">
+      <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.5" fill="none" stroke="white" stroke-width="1.8"/><circle cx="9" cy="9" r="3" fill="white"/></svg>
+      Scanner le recto
+    </button>
+  </div>
+  <div class="notch"></div>
+</div></div>
+</div>
+
+<!-- ══ SCREEN B: GUIDE VERSO ══ -->
+<div>
+<div class="lbl">Écran Guide — Verso</div>
+<div class="phone"><div class="inner">
+  <div class="sbar">
+    <span class="sbar-t">9:43</span>
+    <span style="font-size:11px;color:rgba(255,255,255,0.4);">●●●</span>
+  </div>
+  <div class="hdr">
+    <div class="logo-c"><span class="logo-l">A</span></div>
+    <div><div class="hdr-t">Vérification d'identité</div><div class="hdr-s">eKYC · Attijari Bank</div></div>
+  </div>
+  <div class="steps">
+    <div class="sdot d">✓</div><span class="sn d">Recto</span>
+    <div class="sline d"></div>
+    <div class="sdot a">2</div><span class="sn a">Verso</span>
+    <div class="sline"></div>
+    <div class="sdot p">3</div><span class="sn">Résultat</span>
+  </div>
+  <div class="body">
+    <div class="ttl">Côté verso</div>
+    <div class="sub">Retournez la carte — code-barres et empreinte</div>
+
+    <div class="card-wrap">
+      <!-- FLAT ILLUSTRATION: CIN BACK (inspired by uploaded image) -->
+      <svg width="272" height="178" viewBox="0 0 272 178" xmlns="http://www.w3.org/2000/svg">
+        <!-- Card bg -->
+        <rect x="4" y="4" width="264" height="170" rx="16" fill="#C8C8D8" opacity="0.15"/>
+        <rect x="0" y="0" width="264" height="170" rx="16" fill="#C0B8CC"/>
+        <!-- Green border -->
+        <rect x="0" y="0" width="264" height="170" rx="16" fill="none" stroke="#1DB954" stroke-width="4"/>
+
+        <!-- ── TEXT LINES left zone ── -->
+        <!-- Purple accent line top -->
+        <rect x="14" y="20" width="140" height="6" rx="3" fill="#7755AA"/>
+        <!-- Data lines -->
+        <rect x="14" y="36" width="115" height="7" rx="3" fill="#4A4A5A"/>
+        <rect x="14" y="50" width="95" height="7" rx="3" fill="#4A4A5A" opacity="0.75"/>
+        <!-- Purple data lines (like reference) -->
+        <rect x="14" y="66" width="105" height="7" rx="3" fill="#8855BB" opacity="0.8"/>
+        <rect x="14" y="80" width="85" height="7" rx="3" fill="#8855BB" opacity="0.6"/>
+        <rect x="14" y="96" width="100" height="7" rx="3" fill="#4A4A5A" opacity="0.6"/>
+
+        <!-- ── FINGERPRINT right zone (large, like reference) ── -->
+        <!-- Outer ellipses - fingerprint rings -->
+        <ellipse cx="196" cy="72" rx="44" ry="50" fill="#B8A8C0" opacity="0.4"/>
+        <ellipse cx="196" cy="72" rx="38" ry="43" fill="none" stroke="#4A3A5A" stroke-width="2.2" opacity="0.6"/>
+        <ellipse cx="196" cy="72" rx="30" ry="34" fill="none" stroke="#4A3A5A" stroke-width="2.2" opacity="0.65"/>
+        <ellipse cx="196" cy="72" rx="22" ry="25" fill="none" stroke="#4A3A5A" stroke-width="2.2" opacity="0.7"/>
+        <ellipse cx="196" cy="72" rx="14" ry="16" fill="none" stroke="#4A3A5A" stroke-width="2.2" opacity="0.75"/>
+        <ellipse cx="196" cy="72" rx="7" ry="8" fill="none" stroke="#4A3A5A" stroke-width="2" opacity="0.8"/>
+        <circle cx="196" cy="72" r="2.5" fill="#4A3A5A" opacity="0.7"/>
+        <!-- Bottom arc break (fingerprint detail) -->
+        <path d="M158 108 Q196 118 234 108" fill="none" stroke="#4A3A5A" stroke-width="2" opacity="0.4" stroke-linecap="round"/>
+
+        <!-- ── BARCODE ZONE — bottom strip ── -->
+        <!-- Separator -->
+        <line x1="8" y1="126" x2="256" y2="126" stroke="#9A8AAA" stroke-width="1.5" opacity="0.8"/>
+        <!-- Barcode bg -->
+        <rect x="8" y="130" width="248" height="30" rx="4" fill="white" opacity="0.85"/>
+        <!-- Barcode lines (black on white like reference) -->
+        <rect x="16" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="21" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="25" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="31" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="35" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="40" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="44" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="50" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="55" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="59" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="64" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="70" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="74" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="79" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="83" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="89" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="94" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="98" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="103" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="109" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="113" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="118" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="122" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="128" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="133" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="137" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="142" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="148" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="152" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="157" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="161" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="167" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="172" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="176" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="181" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="187" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="191" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="196" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="200" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="206" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="211" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="215" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="220" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="226" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="230" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="235" y="134" width="1" height="22" rx="0.3" fill="#222"/>
+        <rect x="239" y="134" width="3" height="22" rx="0.3" fill="#222"/>
+        <rect x="245" y="134" width="2" height="22" rx="0.3" fill="#222"/>
+        <rect x="250" y="134" width="1.5" height="22" rx="0.3" fill="#222"/>
+      </svg>
+
+      <!-- Label -->
+      <div class="flip-pill">
+        <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 8a4 4 0 0 1 7-2.65" stroke="white" stroke-width="1.8" stroke-linecap="round" fill="none"/><path d="M11 5.35l-.5 2 2-.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M12 8a4 4 0 0 1-7 2.65" stroke="white" stroke-width="1.8" stroke-linecap="round" fill="none"/><path d="M5 10.65l.5-2-2 .5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        <span class="flip-t">Retournez la carte</span>
+      </div>
+    </div>
+
+    <div class="checks">
+      <div class="check-row">
+        <div class="check-ico" style="background:rgba(29,185,84,0.15);">
+          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#1DB954" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+        <span class="check-t">Code-barres en bas bien visible</span>
+      </div>
+      <div class="check-row">
+        <div class="check-ico" style="background:rgba(29,185,84,0.15);">
+          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#1DB954" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        </div>
+        <span class="check-t">Pas de reflets ni ombre sur le code-barres</span>
+      </div>
+      <div class="check-row">
+        <div class="check-ico" style="background:rgba(204,27,43,0.15);">
+          <svg width="12" height="12" viewBox="0 0 12 12"><line x1="3" y1="3" x2="9" y2="9" stroke="#CC1B2B" stroke-width="1.8" stroke-linecap="round"/><line x1="9" y1="3" x2="3" y2="9" stroke="#CC1B2B" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </div>
+        <span class="check-t">Pas le recto — pas de photo de visage</span>
+      </div>
+    </div>
+
+    <button class="cta">
+      <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.5" fill="none" stroke="white" stroke-width="1.8"/><circle cx="9" cy="9" r="3" fill="white"/></svg>
+      Scanner le verso
+    </button>
+  </div>
+  <div class="notch"></div>
+</div></div>
+</div>
+
+</body>
+</html>
