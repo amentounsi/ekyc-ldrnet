@@ -11,11 +11,19 @@ import {
   Animated,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
+
 import { AttijariLogo } from '../components/AttijariLogo';
 import { validateScan, ValidationResult } from '../services/validationService';
 import BarcodeService from '../native/BarcodeService';
 import { Strings } from '../constants/cinTheme';
 import type { CINBarcodeData } from '../types/barcode';
+
+// Native warp always returns 1000×630 — pass directly, no resize needed.
+function getBarcodeScanBase64(
+  backImage: { base64: string; width: number; height: number }
+): string {
+  return backImage.base64;
+}
 
 interface CINProcessingScreenProps {
   frontCaptured: boolean;
@@ -83,7 +91,8 @@ export const CINProcessingScreen: React.FC<CINProcessingScreenProps> = ({
       if (!scannedBarcode && backImage?.base64) {
         try {
           console.log('[PROCESSING] Starting barcode scan...');
-          const scanResult = await BarcodeService.scanFromBase64(backImage.base64);
+          const barcodeBase64 = getBarcodeScanBase64(backImage);
+          const scanResult = await BarcodeService.scanFromBase64(barcodeBase64);
           if (scanResult.found && scanResult.parsed) {
             scannedBarcode = scanResult.parsed;
             console.log('[PROCESSING] Barcode scanned:', scannedBarcode);
@@ -194,7 +203,7 @@ const StepRow: React.FC<{ step: { label: string; state: StepState } }> = ({ step
         {step.state === 'done' && (
           <View style={stepStyles.doneCircle}>
             <Svg width="12" height="12" viewBox="0 0 12 12">
-              <Path d="M2 6l3 3 5-5" stroke="#1DB954" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+              <Path d="M2 6l3 3 5-5" stroke="#1DB954" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
             </Svg>
           </View>
         )}

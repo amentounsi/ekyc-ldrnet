@@ -50,6 +50,7 @@ import { Colors, Typography, Spacing, BorderRadius, Strings, DetectionThresholds
 import type { CardDetectionResult } from '../types/cardDetection';
 import type { CINBarcodeData } from '../types/barcode';
 import BarcodeService from '../native/BarcodeService';
+import * as FileSystem from 'expo-file-system/legacy';
 
 /**
  * Screen dimensions
@@ -202,10 +203,10 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   const [layoutValid, setLayoutValid] = useState(false);
   const classifyingRef = useRef(false);
   const validateLayoutRef = useRef(false);
-  
+
   // Blur detection state (Phase B.5)
   const [qualityWarning, setQualityWarning] = useState<string | null>(null);
-  
+
   // Barcode scanning state (Phase C)
   const [barcodeData, setBarcodeData] = useState<CINBarcodeData | null>(null);
   const [barcodeScanning, setBarcodeScanning] = useState(false);
@@ -295,6 +296,8 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     isReady,
     frameProcessor,
     scaledCorners,
+    triggerDetection,
+    isDetecting,
   } = useCardDetection({
     enabled: isActive && hasPermission && autoCaptureState !== 'FINISHED',
     onCardDetected,
@@ -325,41 +328,41 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   // CONFIDENCE SCORING SYSTEM
   // Converts detection signals to 0-1 scores for UI feedback
   // ══════════════════════════════════════════════════════════════════════════════
-  
+
   // Calculate confidence from detection signals
   const confidence = useMemo(() => {
     if (!detectionResult?.isValid) return 0;
-    
+
     const debug = detectionResult.debug;
     if (!debug) return 0.5;
-    
+
     // Blur score: Convert Laplacian variance to 0-1
     // Higher variance = sharper image
     // Typical blur scores: <25 = very blurry, 25-50 = acceptable, >50 = sharp
-    const blurScore = debug.blurScore 
+    const blurScore = debug.blurScore
       ? Math.min(1, Math.max(0, (debug.blurScore - 10) / 60))
       : 0.5;
-    
+
     // Lighting score: Use warped luminance if available
     // Target: 80-180 is good, below 60 or above 220 is poor
     const luminance = debug.warpedLuminance || 128;
     const lightingScore = luminance >= 60 && luminance <= 220
       ? Math.min(1, 1 - Math.abs(luminance - 140) / 140)
       : 0.3;
-    
+
     // Alignment score: Use detection confidence or default
     const alignmentScore = detectionResult.confidence || 0.7;
-    
+
     // Combined confidence (weighted average)
     // Blur: 40%, Lighting: 30%, Alignment: 30%
-    const combined = 
-      (blurScore * 0.4) + 
-      (lightingScore * 0.3) + 
+    const combined =
+      (blurScore * 0.4) +
+      (lightingScore * 0.3) +
       (alignmentScore * 0.3);
-    
+
     // Boost if layout is valid and side matches
     const layoutBonus = layoutValid && sideMatches ? 0.1 : 0;
-    
+
     return Math.min(1, combined + layoutBonus);
   }, [detectionResult, layoutValid, sideMatches]);
 
@@ -400,10 +403,10 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
       setManualCaptureBusy(false);
       Animated.sequence([
         Animated.timing(shakeAnim, { toValue: -6, duration: 60, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue:  6, duration: 60, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 6, duration: 60, useNativeDriver: true }),
         Animated.timing(shakeAnim, { toValue: -5, duration: 60, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue:  5, duration: 60, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue:  0, duration: 60, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 5, duration: 60, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 0, duration: 60, useNativeDriver: true }),
       ]).start(() => setCaptureOverlayState('fail'));
     };
 
@@ -506,8 +509,8 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
       // Trigger fail overlay for unexpected errors
       Animated.sequence([
         Animated.timing(shakeAnim, { toValue: -6, duration: 60, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue:  6, duration: 60, useNativeDriver: true }),
-        Animated.timing(shakeAnim, { toValue:  0, duration: 60, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 6, duration: 60, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 0, duration: 60, useNativeDriver: true }),
       ]).start(() => {
         setFailTitle('Capture échouée');
         setFailTips(['Vérifiez que la carte est bien dans le cadre', 'Réessayez dans de bonnes conditions']);
@@ -517,7 +520,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   }, [CardDetectorModule, onScanComplete, onFrontCaptured, injectedFrontImage]);
 
   const handleManualCapturePress = useCallback(async () => {
-    if (manualCaptureBusy || autoCaptureInProgressRef.current || autoCaptureState === 'FINISHED') {
+    if (manualCaptureBusy || isDetecting || autoCaptureInProgressRef.current || autoCaptureState === 'FINISHED') {
       return;
     }
 
@@ -525,22 +528,159 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
     setManualCaptureError(null);
 
     try {
-      // Manual capture: user pressed the button — capture regardless of detection state.
-      // Classification returning NONE does not mean the card is absent.
-      await handleValidatedCapture(expectedSide);
+      // Take photo → send to FastAPI /detect_and_warp → get 1000×630 warped image
+      const detectionRes = await triggerDetection(cameraRef);
+
+      if (!detectionRes?.isValid) {
+        setFailTitle('Carte non détectée');
+        setFailTips([
+          'Placez la carte entièrement dans le cadre',
+          'Assurez une bonne luminosité',
+          'Tenez la carte à plat sans reflets',
+        ]);
+        Animated.sequence([
+          Animated.timing(shakeAnim, { toValue: -6, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue:  6, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue: -5, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue:  5, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue:  0, duration: 60, useNativeDriver: true }),
+        ]).start(() => setCaptureOverlayState('fail'));
+        setManualCaptureBusy(false);
+        return;
+      }
+
+      // ── Side verification ──────────────────────────────────────────────────
+      const detectedSide = ((detectionRes as any)._detectedSide as string | undefined) ?? 'unknown';
+      // Accept when: classifier returned unknown (couldn't decide) OR side matches
+      const sideOk = detectedSide === 'unknown' || detectedSide.toUpperCase() === expectedSide;
+
+      if (!sideOk) {
+        const wantFront = expectedSide === 'FRONT';
+        setFailTitle(wantFront ? 'Présentez le recto' : 'Présentez le verso');
+        setFailTips([
+          wantFront
+            ? 'Le verso de la carte a été détecté — retournez la carte.'
+            : 'Le recto de la carte a été détecté — retournez la carte.',
+          'Assurez-vous que la bonne face est visible dans le cadre.',
+        ]);
+        Animated.sequence([
+          Animated.timing(shakeAnim, { toValue: -6, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue:  6, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue: -5, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue:  5, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue:  0, duration: 60, useNativeDriver: true }),
+        ]).start(() => setCaptureOverlayState('fail'));
+        setManualCaptureBusy(false);
+        return;
+      }
+      // ── End side verification ──────────────────────────────────────────────
+
+      // ── CIN card type check ────────────────────────────────────────────────
+      const isCin = ((detectionRes as any)._isCin as boolean | undefined) !== false;
+      if (!isCin) {
+        setFailTitle('Carte non reconnue');
+        setFailTips([
+          'Veuillez utiliser une CIN tunisienne officielle.',
+          expectedSide === 'FRONT'
+            ? 'Le recto doit afficher le drapeau tunisien en haut à droite.'
+            : 'Le verso doit afficher le code-barres en bas de la carte.',
+        ]);
+        Animated.sequence([
+          Animated.timing(shakeAnim, { toValue: -6, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue:  6, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue: -5, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue:  5, duration: 60, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue:  0, duration: 60, useNativeDriver: true }),
+        ]).start(() => setCaptureOverlayState('fail'));
+        setManualCaptureBusy(false);
+        return;
+      }
+      // ── End CIN card type check ────────────────────────────────────────────
+
+      // Use the server-warped 1000×630 image
+      const warpedBase64 = (detectionRes as any)._warpedBase64;
+      const warpedWidth  = (detectionRes as any)._warpedWidth  ?? 1000;
+      const warpedHeight = (detectionRes as any)._warpedHeight ?? 630;
+
+      if (!warpedBase64) {
+        setFailTitle('Capture échouée');
+        setFailTips(['Le serveur n\'a pas renvoyé l\'image. Réessayez.']);
+        setCaptureOverlayState('fail');
+        setManualCaptureBusy(false);
+        return;
+      }
+
+      const capturedImg = { base64: warpedBase64, width: warpedWidth, height: warpedHeight };
+
+      if (expectedSide === 'FRONT') {
+        // ── FRONT captured — same structure as original handleValidatedCapture ──
+        setCapturedFrontImage(capturedImg);
+        capturedFrontImageRef.current = capturedImg;
+        console.log('[MANUAL-CAPTURE] FRONT warped:', warpedWidth, 'x', warpedHeight);
+
+        setAutoCaptureState('FINISHED');
+
+        // Face extraction (non-fatal if it fails — server warp is not in native buffer)
+        let faceImg: { base64: string; width: number; height: number } | null = null;
+        try {
+          faceImg = await CardDetectorModule.extractFacePhoto();
+          if (faceImg) {
+            setFacePhoto(faceImg);
+            facePhotoRef.current = faceImg;
+          }
+        } catch (_) {}
+
+        const localFront = capturedImg;
+        const localFace = faceImg;
+        successOverlayCallback.current = () => {
+          if (onFrontCaptured) {
+            onFrontCaptured(localFront, localFace);
+          }
+        };
+        setCaptureOverlayMessage('Recto validé ✓');
+        setCaptureOverlaySubMessage('Passez au verso de la carte');
+        setCaptureOverlayState('success');
+        autoCaptureInProgressRef.current = false;
+        setManualCaptureBusy(false);
+
+      } else {
+        // ── BACK captured — same structure as original handleValidatedCapture ──
+        setCapturedBackImage(capturedImg);
+        console.log('[MANUAL-CAPTURE] BACK warped:', warpedWidth, 'x', warpedHeight);
+
+        setAutoCaptureState('FINISHED');
+
+        const finalFacePhoto = facePhotoRef.current;
+        const finalFrontImage = capturedFrontImageRef.current ?? injectedFrontImage ?? null;
+
+        if (onScanComplete && finalFrontImage) {
+          // Navigate to processing screen — barcode scan happens there
+          onScanComplete(finalFrontImage, capturedImg, finalFacePhoto, null);
+        } else {
+          setShowCompletionModal(true);
+        }
+        autoCaptureInProgressRef.current = false;
+        setManualCaptureBusy(false);
+      }
+
     } catch (err) {
       console.error('[MANUAL-CAPTURE] Error:', err);
       setManualCaptureError('Capture failed. Please try again.');
-    } finally {
-      if (!autoCaptureInProgressRef.current) {
-        setManualCaptureBusy(false);
-      }
+      autoCaptureInProgressRef.current = false;
+      setManualCaptureBusy(false);
     }
   }, [
     autoCaptureState,
     expectedSide,
-    handleValidatedCapture,
     manualCaptureBusy,
+    isDetecting,
+    triggerDetection,
+    cameraRef,
+    shakeAnim,
+    CardDetectorModule,
+    onFrontCaptured,
+    onScanComplete,
+    injectedFrontImage,
   ]);
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -573,7 +713,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
       }
       return;
     }
-    
+
     // Check blur and show warning
     if (isBlurry) {
       setQualityWarning(Strings.scanning.tooBlurry);
@@ -672,7 +812,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
               buttonPositive: 'OK',
             }
           );
-          
+
           if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
             Alert.alert(
               'Permission Required',
@@ -738,7 +878,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
         <StatusBar barStyle="light-content" backgroundColor="#000" />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#00FF00" />
-          <Text style={styles.loadingText}>Initializing card detector...</Text>
+          <Text style={styles.loadingText}>Initialisation de la caméra...</Text>
         </View>
       </View>
     );
@@ -747,20 +887,21 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
   return (
     <View style={styles.container} onLayout={onLayout}>
       <StatusBar barStyle="light-content" backgroundColor="#000" translucent />
-      
+
       {/* Camera */}
       <Camera
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         device={device}
         isActive={isActive}
+        photo={true}
         frameProcessor={frameProcessor}
         torch={enableTorch ? 'on' : 'off'}
         pixelFormat="yuv"
         orientation="portrait"
         format={format}
       />
-      
+
       {/* CIN Scan Frame wrapped in Animated.View for shake effect */}
       <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
         <CINScanFrame
@@ -772,10 +913,10 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
           viewHeight={viewDimensions.height}
         />
       </Animated.View>
-      
+
       {/* Timeout Reminder */}
-      <TimeoutReminder 
-        visible={showReminder} 
+      <TimeoutReminder
+        visible={showReminder}
         onDismiss={dismissReminder}
       />
 
@@ -848,22 +989,24 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
           <TouchableOpacity
             style={[
               styles.captureButton,
-              (manualCaptureBusy || captureOverlayState !== 'idle') && styles.captureButtonDisabled,
+              (manualCaptureBusy || isDetecting || captureOverlayState !== 'idle') && styles.captureButtonDisabled,
             ]}
             onPress={handleManualCapturePress}
-            disabled={manualCaptureBusy || captureOverlayState !== 'idle'}
+            disabled={manualCaptureBusy || isDetecting || captureOverlayState !== 'idle'}
             activeOpacity={0.85}
           >
             <Svg width="18" height="18" viewBox="0 0 18 18">
-              <SvgCircle cx="9" cy="9" r="6.5" fill="none" stroke="white" strokeWidth="1.8"/>
-              <SvgCircle cx="9" cy="9" r="3" fill="white"/>
+              <SvgCircle cx="9" cy="9" r="6.5" fill="none" stroke="white" strokeWidth="1.8" />
+              <SvgCircle cx="9" cy="9" r="3" fill="white" />
             </Svg>
             <Text style={styles.captureButtonText}>
-              {manualCaptureBusy
-                ? 'Vérification...'
-                : expectedSide === 'FRONT'
-                ? 'Capturer le recto'
-                : 'Capturer le verso'}
+              {isDetecting
+                ? 'Analyse en cours...'
+                : manualCaptureBusy
+                  ? 'Vérification...'
+                  : expectedSide === 'FRONT'
+                    ? 'Capturer le recto'
+                    : 'Capturer le verso'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -895,7 +1038,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
           }}
         />
       )}
-      
+
       {/* Debug Info */}
       {showDebugInfo && (
         <View style={styles.debugContainer}>
@@ -1026,20 +1169,20 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
               {/* Barcode Data Section (Phase C) */}
               <View style={styles.barcodeSection}>
                 <Text style={styles.barcodeSectionTitle}>📊 Barcode Data</Text>
-                
+
                 {barcodeScanning && (
                   <View style={styles.barcodeLoading}>
                     <ActivityIndicator size="small" color="#00FF00" />
                     <Text style={styles.barcodeLoadingText}>Scanning barcode...</Text>
                   </View>
                 )}
-                
+
                 {barcodeError && !barcodeScanning && (
                   <View style={styles.barcodeErrorContainer}>
                     <Text style={styles.barcodeErrorText}>⚠️ {barcodeError}</Text>
                   </View>
                 )}
-                
+
                 {barcodeData && barcodeData.isValid && !barcodeScanning && (
                   <View style={styles.barcodeDataContainer}>
                     <View style={styles.barcodeRow}>
@@ -1064,7 +1207,7 @@ export const CameraScreen: React.FC<CameraScreenProps> = ({
                     </View>
                   </View>
                 )}
-                
+
                 {barcodeData && !barcodeData.isValid && !barcodeScanning && (
                   <View style={styles.barcodeErrorContainer}>
                     <Text style={styles.barcodeErrorText}>
@@ -1369,7 +1512,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.lg,
     fontWeight: Typography.weights.bold,
   },
-  
+
   // Barcode Section Styles (Attijari Theme)
   barcodeSection: {
     marginTop: Spacing.xl,

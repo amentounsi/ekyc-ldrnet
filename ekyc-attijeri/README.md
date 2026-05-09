@@ -1,335 +1,433 @@
-# Attijari eKYC — React Native App
+# eKYC Attijari — React Native Mobile Application
 
-Mobile eKYC (electronic Know Your Customer) application for Attijari Bank Tunisia.  
-Built with React Native (Expo bare workflow) + custom native Android modules (OpenCV NDK C++, ZXing).
-
----
-
-## Project Status
-
-| Phase | Feature | Status |
-|-------|---------|--------|
-| **Phase 1** | Tunisian CIN card scanning (Recto + Verso) | ✅ Complete |
-| **Phase 1** | Native card detection (OpenCV C++ NDK) | ✅ Complete |
-| **Phase 1** | Perspective warp to 1000×630 | ✅ Complete |
-| **Phase 1** | Barcode scan from Verso (ZXing) | ✅ Complete |
-| **Phase 1** | Face photo extraction from Recto | ✅ Complete |
-| **Phase 1** | Blur gate (rejects blurry captures) | ✅ Complete |
-| **Phase 2** | Liveness detection (MiniFASNet via FastAPI) | 🔄 Started |
-| **Phase 3** | OCR on Recto text fields | ⬜ Planned |
-| **Phase 4** | Backend integration & data submission | ⬜ Planned |
+A production-ready **Expo bare-workflow** React Native application implementing a full eKYC (electronic Know Your Customer) pipeline for Attijari Bank Tunisia. Features a native Tunisian CIN card scanner with OpenCV-powered C++ detection, ZXing barcode reader, and a Python/FastAPI LDRNet server for AI-based card corner detection.
 
 ---
 
-## Architecture
+## Architecture Overview
 
 ```
-ekyc-attijeri/
-├── App.tsx                          # Navigation root (React Navigation)
-├── src/
-│   ├── screens/
-│   │   ├── CINScreen.tsx            # CIN scan orchestrator (scan → result)
-│   │   ├── CINScanScreen.tsx        # Camera screen with frame processor
-│   │   ├── CINResultScreen.tsx      # Displays captured front/back/face + barcode
-│   │   ├── LivenessScreen.tsx       # Liveness detection (Phase 2)
-│   │   ├── HomeScreen.tsx           # Dashboard
-│   │   └── ...                      # Other app screens (Login, Form, Map, etc.)
-│   ├── components/
-│   │   ├── CINScanFrame.tsx         # Card overlay frame (guide user)
-│   │   ├── CaptureTransition.tsx    # Flip/processing animations
-│   │   └── ...
-│   ├── hooks/
-│   │   ├── useCardDetection.ts      # VisionCamera frame processor hook
-│   │   └── useDetectionTimeout.ts
-│   ├── native/
-│   │   ├── CardDetectorModule.ts    # JS bridge to native card detector
-│   │   └── BarcodeService.ts        # JS bridge to ZXing barcode scanner
-│   ├── services/
-│   │   └── validationService.ts
-│   ├── constants/
-│   │   ├── cinTheme.ts
-│   │   ├── colors.ts
-│   │   └── translations.ts          # Arabic/French/English strings
-│   └── types/
-│       ├── cardDetection.ts
-│       └── barcode.ts
-└── android/
-    └── app/src/main/
-        ├── java/com/attijari/ekyc/
-        │   ├── carddetector/
-        │   │   ├── CardDetectorModule.java       # RN native module (exposes detection to JS)
-        │   │   ├── CardDetectorJNI.java          # JNI bridge
-        │   │   └── CardDetectorFrameProcessor.java # VisionCamera frame processor plugin
-        │   └── barcode/
-        │       └── BarcodeScannerModule.java     # ZXing barcode scanner (18+ strategies)
-        └── cpp/
-            ├── CardDetectorJNI.cpp               # JNI bridge + capture state machine
-            ├── CardDetector.cpp/.h               # 7-stage card detection pipeline (OpenCV)
-            └── warp/
-                └── CardWarper.cpp/.h             # Perspective warp + unsharp masking
+┌─────────────────────────────────────────────────────────────┐
+│                 React Native (Expo Bare Workflow)            │
+│                                                             │
+│  VisionCamera v4 ──► C++ CardDetector (JNI / OpenCV NDK)   │
+│        │                  │                                 │
+│        │            CardSideClassifier                      │
+│        │            OfficialCINValidator                    │
+│        │            LivePresenceValidator                   │
+│        │            ScreenDetector                          │
+│        │                                                    │
+│        ▼                                                    │
+│  FastAPI (LDRNet) ──► detect_and_warp ──► 1000×630 JPEG    │
+│        │                                                    │
+│        ▼                                                    │
+│  BarcodeScannerModule (ZXing, Java, multi-strategy)         │
+│        │                                                    │
+│        ▼                                                    │
+│  CINResultScreen ──► { CIN number, release date, face }    │
+└─────────────────────────────────────────────────────────────┘
 ```
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Framework | React Native 0.81.5 + Expo ~54 (bare workflow) |
-| Camera | react-native-vision-camera v4.7.3 |
-| Frame processor | react-native-worklets-core v1.6.3 |
-| Native detection | OpenCV 4 (NDK C++17) |
-| Barcode scanning | ZXing (Java, 18+ decode strategies) |
-| Liveness | MiniFASNet via FastAPI Python server |
-| Navigation | React Navigation v7 |
-| Build | Gradle 8, NDK 27.1.12297006, CMake |
 
 ---
 
 ## Prerequisites
 
-### System tools
-- **Node.js** >= 18.x — https://nodejs.org/
-- **npm** >= 9.x (included with Node)
-- **Git** >= 2.30
+| Tool | Version | Notes |
+|---|---|---|
+| Node.js | ≥ 18.x | https://nodejs.org/ |
+| npm | ≥ 9.x | bundled with Node |
+| Java JDK | ≥ 17 | bundled with Android Studio |
+| Android Studio | ≥ Hedgehog (2023.1.1) | https://developer.android.com/studio |
+| Android SDK compileSdk | 36 | via SDK Manager |
+| Android SDK minSdk | 24 | (Android 7.0+) |
+| NDK (Side by side) | **27.1.12297006** | via SDK Manager → SDK Tools → NDK |
+| CMake | ≥ 3.22 | via SDK Manager → SDK Tools → CMake |
+| Python | 3.9 – 3.11 | for LDRNet server |
+| OpenCV Android SDK | **4.10.0** | downloaded separately — see Step 5 |
 
-### Android build (required for native modules)
-- **Android Studio** >= Hedgehog (2023.1.1) — https://developer.android.com/studio
-- **Android SDK** — `compileSdk 36`, `minSdk 24`, `targetSdk 35`
-- **NDK version** `27.1.12297006` — install via SDK Manager → SDK Tools → NDK (Side by side)
-- **CMake** >= 3.22 — install via SDK Manager → SDK Tools → CMake
-- **JDK** 17+ (bundled with Android Studio)
-- **ADB** (Android Debug Bridge) — included with Android SDK
-
-### Environment variables
-```bash
-ANDROID_HOME=C:\Users\<you>\AppData\Local\Android\Sdk   # Windows
-ANDROID_HOME=$HOME/Library/Android/sdk                  # macOS
-```
-
-### Liveness (Phase 2 — optional)
-- **Python** >= 3.9
-- FastAPI server running locally (see `LivenessScreen.tsx` for `API_URL`)
+> ⚠️ **Expo Go is NOT supported.** This project uses custom native modules (C++ NDK, Java JNI). You **must** build the APK.
 
 ---
 
-## Setup & Run
+## Step-by-Step Setup
 
-### 1. Install JS dependencies
+### Step 1 — Clone the repository
+
 ```bash
-cd ekyc-attijeri
+git clone https://github.com/amentounsi/ekyc-ettijeri.git
+cd ekyc-ettijeri
+```
+
+---
+
+### Step 2 — Install JavaScript dependencies
+
+```bash
 npm install
 ```
 
-### 2. Download OpenCV Android SDK (required — not in git, 776 MB)
-The OpenCV SDK is excluded from the repository due to its size.  
-Download it manually and place it in the correct location:
+---
 
+### Step 3 — Configure Android environment variables
+
+**Windows (PowerShell / System Environment):**
+```
+ANDROID_HOME = C:\Users\<your-username>\AppData\Local\Android\Sdk
+```
+
+Add to PATH:
+```
+%ANDROID_HOME%\platform-tools
+%ANDROID_HOME%\tools
+```
+
+**Linux / macOS (`~/.bashrc` or `~/.zshrc`):**
 ```bash
-# Download OpenCV 4.10.0 Android SDK
-# https://github.com/opencv/opencv/releases/tag/4.10.0
-# File: opencv-4.10.0-android-sdk.zip
-
-# Extract and rename:
-# android/app/src/main/cpp/OpenCV-android-sdk/
+export ANDROID_HOME=$HOME/Android/Sdk
+export PATH=$PATH:$ANDROID_HOME/platform-tools
 ```
 
-The folder structure should be:
-```
-android/app/src/main/cpp/OpenCV-android-sdk/
-    sdk/
-        native/
-            libs/
-                arm64-v8a/
-                    libopencv_java4.so
-                    ...
-            jni/
-                include/
-                    opencv2/
-                        ...
-        java/
-            ...
+Verify:
+```bash
+adb --version
 ```
 
-### 3. Build the Android app (first time / after native changes)
+---
+
+### Step 4 — Install NDK and CMake via Android Studio
+
+1. Open **Android Studio**
+2. Go to **SDK Manager** → **SDK Tools** tab
+3. Check:
+   - ✅ **NDK (Side by side)** → select version `27.1.12297006`
+   - ✅ **CMake** → select version `3.22.x`
+4. Click **Apply**
+
+---
+
+### Step 5 — Download and place OpenCV Android SDK
+
+> OpenCV is **~776 MB** and is excluded from git via `.gitignore`.
+
+1. Go to: https://github.com/opencv/opencv/releases/tag/4.10.0
+2. Download: `opencv-4.10.0-android-sdk.zip`
+3. Extract it so the folder structure is:
+
+```
+ekyc-ettijeri/
+└── android/
+    └── app/
+        └── src/
+            └── main/
+                └── cpp/
+                    └── OpenCV-android-sdk/     ← place here
+                        └── sdk/
+                            ├── native/
+                            │   ├── jni/        (contains OpenCVConfig.cmake)
+                            │   └── libs/       (contains .so files per ABI)
+                            └── java/
+```
+
+**Verify** the path is correct:
+```
+android/app/src/main/cpp/OpenCV-android-sdk/sdk/native/jni/OpenCVConfig.cmake
+```
+This file **must exist** or the CMake build will fail.
+
+---
+
+### Step 6 — Build the Android APK
+
 ```bash
 cd android
 ./gradlew assembleDebug -x lint
 ```
-Build output: `android/app/build/outputs/apk/debug/app-debug.apk`
 
-### 3. Install on physical device
+On Windows:
+```powershell
+cd android
+.\gradlew assembleDebug -x lint
+```
+
+First build takes **5–15 minutes** (compiling C++ with NDK). Subsequent builds are incremental.
+
+Output APK:
+```
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+---
+
+### Step 7 — Install on device
+
+Connect your Android phone via USB with **USB debugging enabled**, then:
+
 ```bash
-adb devices                          # confirm device is connected
+adb devices               # confirm device is listed
 adb install android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 4. Start Metro bundler
+Or run directly (builds + installs + starts Metro):
 ```bash
-cd ..                                # back to ekyc-attijeri/
-adb reverse tcp:8081 tcp:8081        # route Metro traffic to device
+# From project root (ekyc-ettijeri/)
+npm run android
+```
+
+---
+
+### Step 8 — Start the Metro bundler
+
+```bash
+# From project root
 npx expo start --dev-client --port 8081
 ```
 
-### 5. Launch on device
-The app will auto-connect to Metro. If not, shake the device → "Reload".
-
----
-
-## Native Module Overview (Phase 1)
-
-### Card Detection Pipeline (`CardDetector.cpp`)
-
-7-stage OpenCV pipeline running at ~15 FPS on every camera frame (throttled via `kMinProcessIntervalMs`).  
-Source: `android/app/src/main/cpp/CardDetector.cpp`
-
-#### Stage 0 — Overlay-Guided ROI Extraction
-- If `config_.overlay.enabled && config_.useROICropping`, the full frame is cropped to the overlay rectangle before detection.
-- Reduces false positives from background clutter; the ROI offset is added back to all output corners.
-
-#### Stage 1 — Preprocessing (`preprocessFrame`)
-- Convert to grayscale (input arrives as YUV gray plane from VisionCamera).
-- **Adaptive CLAHE**: skipped if `stddev < 35`; `clipLimit=1.2` if `35–55`; `clipLimit=1.5` if `>55`.
-- **GaussianBlur** with kernel size from `config_.gaussianBlurSize`.
-- **Adaptive Canny**: low/high thresholds derived from the median pixel value of the central 40% ROI (`cannyMedianLow`, `cannyMedianHigh` in config).
-- **3×3 dilate** (single pass) to close small edge gaps.
-- Raw Canny edges saved to `cannyEdges_` before dilation (used by Stage 3 edge density check).
-
-#### Stage 2 — Contour Extraction (`extractContours`)
-- `cv::findContours` with `RETR_LIST` (not `RETR_EXTERNAL` — needed so the card contour is visible even when the card is held in hand; EXTERNAL returns only the hand silhouette).
-- Pre-filter by area: keep contours in `[minAreaRatio×0.5, maxAreaRatio]`.
-- Quick-score each contour: `0.2×areaScore + 0.3×convexQuad + 0.4×aspectRatioScore + 0.1×centerProximity`.
-- Return top-N by quick-score (configurable via `config_.topN`).
-
-#### Stage 3 — Geometric Ranking (`rankContours`)
-- For each contour, try `approxPolyDP` with `epsilon` from `0.01→0.06` (step 0.005), keep best 4-vertex convex result.
-- Fallback: convex hull → `approxPolyDP`.
-- Filters: area ratio in range, aspect ratio within `config_.aspectRatioTolerance` of target (`85.6/54 ≈ 1.585`), portrait orientation also accepted (`1/1.585`).
-- **Edge density check**: sample 20 points per side; require Canny edge pixel within ±3px of each sample. Returns the **second-lowest** side density (tolerates one weak/occluded side, rejects desk/door blobs that have edges on only 1–2 sides).
-
-#### Stage 4 — Best Candidate Selection (`selectBestCandidate`)
-- Weighted score: `wArea×areaScore + wRatio×ratioScore + wRectangularity×rectScore + wEdgeDensity×edgeScore + wCenter×centerScore`
-- Rectangularity = `1 − avg|cos(interior angle)| × 2` (perfect rectangle → all cos ≈ 0).
-
-#### Stage 5 — Multi-Level Geometric Validation
-- **5a** Geometry gate: `score ≥ minGeometryScore`, area in `[minAreaRatio, maxAreaRatio]`.
-- **5b** Physical plausibility: without overlay, reject if `areaRatio > 0.20` (PC screen / desk fills frame).
-- **5c** Border contrast: sample 30 points per side; measure `|grayInner − grayOuter|` at ±4px from each side; score = `meanContrast / borderContrastNorm`. Low contrast → not a white card.
-- **5d** Overlay constraints (when overlay enabled): area closeness to overlay, center alignment, overlap ratio — with hysteresis (relaxed thresholds in `LOCKED` state for stability).
-- **5e** Appearance validation: perspective-warp quad to `appearanceWarpWidth × appearanceWarpHeight`, compute mean/stddev of gray; reject if too dark (`mean < appearanceMeanMin`), too textured (`stddev > appearanceStddevMax`), or dark+textured combined.
-
-#### Stage 6 — Red Corner Validation (`validateRedCorners`) — Recto only
-- **Used for Recto (front) only.** Disabled for Verso (back) via `config_.redValidationEnabled = false`.
-- Checks all 4 corners of the quad for the Tunisian flag (red block in one corner).
-- Per-corner test (adaptive to scene luminance):
-  - `redRatio ≥ adaptMinRed` (0.06→0.15 based on mean luminance)
-  - `compactness ≥ 0.45` (red forms a solid block, not scattered pixels like a wallpaper)
-  - `bboxFill ≥ 0.12` (bbox covers meaningful part of zone)
-  - If bright scene (`t > 0.4`): also requires `whiteRatio ≥ 0.08`
-- **Uniqueness check**: exactly 1–2 valid corners accepted. 3–4 → rejected (PC screen / wallpaper with red spread across image).
-- Final confidence: `geo×0.5 + border×0.3 + red×0.2` (Recto) or `geo×0.625 + border×0.375` (Verso, red weight redistributed).
-
-#### Stage 7 — Temporal Buffer
-- Circular buffer of size `config_.temporalBufferSize` (default 5).
-- Requires `config_.temporalMinValid` consecutive valid frames (default 4/5) before emitting a detection.
-- **Detection state machine**: `SEARCHING → ALIGNING → LOCKED`
-  - `LOCKED` state uses relaxed overlay thresholds (hysteresis).
-  - After `config_.lockedFailFramesToReset` consecutive failures, resets to `SEARCHING`.
-- Call `resetTemporalState()` when switching from Recto to Verso scan (already done in `CardDetectorJNI.cpp`).
-
-#### Key Configuration Notes (for future changes)
-| Parameter | Current value | Notes |
-|-----------|--------------|-------|
-| `BLUR_THRESHOLD` | `22.f` | Laplacian variance in `CardDetectorJNI.cpp`. Tuned for 1280×720. |
-| `targetAspectRatio` | `1.585` | CIN card is 85.6mm × 54mm |
-| `processWidth` | `640` | Frame downscaled to 640px wide before detection |
-| Camera resolution | `1280×720` | Set via `useCameraFormat` in `CINScanScreen.tsx` |
-| Warp output size | `1000×630` | Set in `CardWarper.cpp` |
-| Barcode strip | bottom 10% | Strip `y = height * 0.90` in `BarcodeScannerModule.java` |
-
-### Perspective Warp (`CardWarper.cpp`)
-- Output: 1000×630 grayscale
-- Post-warp: unsharp masking (`1.8 × warped − 0.8 × GaussianBlur(σ=1.5)`)
-- Blur gate: Laplacian variance threshold = 22 (blocks blurry captures before accepting)
-
-### Barcode Scanner (`BarcodeScannerModule.java`)
-- 18+ ZXing decode strategies: different crop regions, scales (1×–8×), Otsu thresholding
-- Barcode location: bottom ~10% of 1000×630 back image
-- **Critical**: Laplacian sharpening is NOT applied — it corrupts bar-width ratios and breaks ZXing decoding. Only contrast enhancement + Otsu thresholding are used.
-
----
-
-## Liveness Detection (Phase 2 — in progress)
-
-`LivenessScreen.tsx` already has a working skeleton:
-- Uses `expo-camera` (not VisionCamera) to capture frames
-- Calls a FastAPI server running MiniFASNet
-- Threshold: 0.60, 3 frames per attempt
-
-**To configure:** update `API_URL` in `LivenessScreen.tsx` to your FastAPI server IP.
-
-The FastAPI server code is separate and NOT included in this repo.  
-It should expose: `POST /predict` accepting a base64 frame and returning `{ score: float }`.
-
----
-
-## Useful Commands
-
+In another terminal, reverse the ADB port so the device can reach Metro:
 ```bash
-# Full rebuild after native C++ changes (NDK)
-cd android && ./gradlew assembleDebug -x lint
+adb reverse tcp:8081 tcp:8081
+```
 
-# Fresh install (required after changing package name or native modules)
+---
+
+### Step 9 — Start the LDRNet Python server
+
+The CIN scan screen sends each captured frame to a FastAPI server running LDRNet for precise corner detection.
+
+**Clone the server repo:**
+```bash
+git clone https://github.com/amentounsi/ekyc-ldrnet.git
+cd ekyc-ldrnet
+```
+
+**Install Python deps:**
+```bash
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # Linux/macOS
+pip install -r requirements.txt
+```
+
+**Place the model** (download from your team's shared link):
+```
+ekyc-ldrnet/
+└── model_file/
+    └── model-icdar-1.4/
+        ├── saved_model.pb
+        └── variables/
+```
+
+**Run:**
+```bash
+python main.py
+```
+
+---
+
+### Step 10 — Configure the server IP in the app
+
+Edit `src/services/validationService.ts`:
+
+```typescript
+// For Android emulator connecting to host machine:
+const SERVER_URL = 'http://10.0.2.2:8000';
+
+// For a physical device on the same Wi-Fi:
+const SERVER_URL = 'http://192.168.X.X:8000';   // ← replace with your PC's LAN IP
+```
+
+**Find your PC's LAN IP:**
+```bash
+# Windows
+ipconfig           # look for IPv4 Address under Wi-Fi
+
+# Linux / macOS
+ifconfig | grep "inet "
+```
+
+Make sure the phone and PC are on **the same Wi-Fi network**.
+
+Also reverse the server port:
+```bash
+adb reverse tcp:8000 tcp:8000    # if using USB ADB (emulator or physical via USB)
+```
+
+---
+
+## Project Structure
+
+```
+ekyc-attijeri/
+├── App.tsx                          ← Navigation root
+├── index.ts                         ← Entry point
+├── package.json
+├── babel.config.js
+├── tsconfig.json
+│
+├── src/
+│   ├── screens/
+│   │   ├── CINScanScreen.tsx        ← Main CIN scanning UI (VisionCamera + state machine)
+│   │   ├── CINResultScreen.tsx      ← Result display (photo, CIN number, date)
+│   │   ├── CINGuideBackScreen.tsx   ← Back-side capture guide
+│   │   ├── CINGuideFrontScreen.tsx  ← Front-side capture guide
+│   │   ├── CINIntroScreen.tsx
+│   │   ├── HomeScreen.tsx
+│   │   ├── LivenessScreen.tsx       ← Phase 2 liveness check
+│   │   └── ...
+│   ├── components/
+│   │   ├── CINScanFrame.tsx         ← Camera frame overlay
+│   │   ├── CINFrameRecto.tsx        ← Front card guide overlay
+│   │   ├── CINFrameVerso.tsx        ← Back card guide overlay
+│   │   └── ...
+│   ├── native/
+│   │   ├── CardDetectorModule.ts    ← JS bridge to Java CardDetectorModule
+│   │   └── BarcodeService.ts        ← JS bridge to Java BarcodeScannerModule
+│   ├── frameProcessor/
+│   │   └── detectCard.ts            ← VisionCamera frame processor plugin
+│   ├── services/
+│   │   └── validationService.ts     ← FastAPI client (LDRNet server calls)
+│   ├── context/
+│   │   └── AppContext.tsx
+│   └── types/
+│
+└── android/
+    └── app/
+        └── src/main/
+            ├── AndroidManifest.xml
+            ├── java/com/attijari/ekyc/
+            │   ├── MainActivity.kt
+            │   ├── MainApplication.kt      ← Registers CardDetectorPackage + BarcodeScannerPackage
+            │   ├── carddetector/
+            │   │   ├── CardDetectorModule.java         ← React Native module (capture + warp)
+            │   │   ├── CardDetectorJNI.java            ← JNI bridge to C++
+            │   │   ├── CardDetectorFrameProcessor.java ← VisionCamera frame plugin
+            │   │   ├── CardDetectorPackage.java
+            │   │   └── CardDetectorPluginProvider.java
+            │   └── barcode/
+            │       ├── BarcodeScannerModule.java       ← Multi-strategy ZXing decoder
+            │       └── BarcodeScannerPackage.java
+            └── cpp/
+                ├── CMakeLists.txt
+                ├── CardDetector.cpp / .h               ← Core detection logic
+                ├── CardDetectorJNI.cpp                 ← JNI entry points
+                ├── warp/
+                │   └── CardWarper.cpp / .h             ← Perspective warp + unsharp mask
+                └── validation/
+                    ├── CardSideClassifier.cpp / .h     ← Front/back classification
+                    ├── OfficialCINValidator.cpp / .h   ← CIN format validation
+                    ├── LivePresenceValidator.cpp / .h  ← Anti-spoof checks
+                    └── ScreenDetector.cpp / .h         ← Screen/digital display rejection
+```
+
+---
+
+## Scanning Pipeline — How It Works
+
+```
+VisionCamera Frame
+      │
+      ▼
+CardDetectorFrameProcessor (Java)
+      │  — blur score check (threshold: 14)
+      │  — calls native C++ CardDetector via JNI
+      ▼
+CardDetector.cpp (C++ / OpenCV NDK)
+      │  — edge detection, contour finding, corner extraction
+      │  — LivePresenceValidator (glare, moiré check)
+      │  — ScreenDetector (reject phone/monitor screens)
+      │  — CardSideClassifier (front vs back)
+      │  — OfficialCINValidator (layout checks)
+      ▼  isValid=true → auto-capture trigger
+CardDetectorModule.java
+      │
+      ▼
+validationService.ts → POST /detect_and_warp → FastAPI LDRNet Server
+      │  — LDRNet model: detect precise corners
+      │  — Bounding-box crop + 5% padding
+      │  — Deskew (minAreaRect affine warp)
+      │  — Resize → 1000×630 px
+      │  — CLAHE + adaptive gamma + unsharp mask
+      │  — Side classify + CIN validate
+      ▼  returns: { base64, side, is_cin }
+CINScanScreen.tsx
+      │  — capturedFrontImage / capturedBackImage stored in refs
+      │
+      ▼  (after back captured)
+BarcodeScannerModule.java
+      │  — Multi-strategy ZXing scan:
+      │    S0: horizontal strip crop (bottom 20%)
+      │    S1: full image, all orientations
+      │    S2: enhanced contrast + threshold
+      │    S3: grayscale normalized
+      │    S4: full rotations fallback
+      ▼
+CINResultScreen.tsx
+      — CIN number, release date, extracted face photo
+```
+
+---
+
+## Common Build Errors & Fixes
+
+### `CMake Error: OpenCV not found`
+→ OpenCV SDK is missing. Re-do **Step 5**.
+
+### `INSTALL_FAILED_UPDATE_INCOMPATIBLE`
+```bash
 adb uninstall com.attijari.ekyc
 adb install android/app/build/outputs/apk/debug/app-debug.apk
-
-# View native logs (card detector)
-adb logcat -s CardDetectorJNI:I CardDetector:I
-
-# View barcode scanner logs
-adb logcat -s BarcodeScannerModule:*
-
-# View blur scores in real time
-adb logcat | grep BLUR
 ```
+
+### `SDK location not found`
+Create `android/local.properties`:
+```
+sdk.dir=C\:\\Users\\<your-username>\\AppData\\Local\\Android\\Sdk
+```
+
+### `Error: JAVA_HOME is not set`
+Set JAVA_HOME to the JDK bundled with Android Studio:
+```
+JAVA_HOME = C:\Program Files\Android\Android Studio\jbr
+```
+
+### `Execution failed for task ':app:externalNativeBuildDebug'`
+NDK version mismatch. Ensure NDK `27.1.12297006` is installed in Android Studio SDK Manager.
+
+### `Metro: Unable to resolve module`
+```bash
+npm install
+npx expo start --clear
+```
+
+### `Connection refused` (LDRNet server)
+- Start `python main.py` in the server folder
+- Check `SERVER_URL` in `validationService.ts` matches your PC's LAN IP
+- Run `adb reverse tcp:8000 tcp:8000`
 
 ---
 
-## App Navigation Flow
+## Key Dependencies
 
-```
-SplashScreen
-    └── LoginScreen / RegisterScreen / OTPScreen
-            └── HomeScreen (dashboard)
-                    ├── CINScreen          ← Phase 1 ✅
-                    │     ├── CINScanScreen (camera + detection)
-                    │     └── CINResultScreen (review captured data)
-                    ├── LivenessScreen     ← Phase 2 🔄
-                    ├── FormScreen
-                    ├── SignatureScreen
-                    ├── RecapScreen
-                    └── ...
-```
+| Package | Version | Purpose |
+|---|---|---|
+| `react-native-vision-camera` | ^4.7.3 | Camera + frame processors |
+| `react-native-worklets-core` | ^1.6.3 | JS worklet runtime |
+| `react-native-reanimated` | ^3.19.5 | Animations |
+| `expo` | ~54.0.33 | SDK |
+| `react-native` | 0.81.5 | Framework |
+| `com.google.zxing:core` | 3.5.2 | Barcode decoding |
+| OpenCV Android SDK | 4.10.0 | Native image processing |
 
 ---
 
-## Package Name & Bundle ID
+## Related Repositories
 
-- Android: `com.attijari.ekyc`
-- App name: `AttijariEKYC`
+| Repo | Description |
+|---|---|
+| **This repo** — [ekyc-ettijeri](https://github.com/amentounsi/ekyc-ettijeri) | React Native mobile app |
+| [ekyc-ldrnet](https://github.com/amentounsi/ekyc-ldrnet) | FastAPI Python server (LDRNet model) |
 
 ---
 
-## Contributing
+## License
 
-1. Fork the repo
-2. Create a feature branch: `git checkout -b feature/phase2-liveness`
-3. Make your changes and test on a physical Android device (emulators don't support camera frame processors)
-4. Commit: `git commit -m "feat: implement liveness detection"`
-5. Push and open a Pull Request
-
-
-- `src/screens`: ecrans de l'application
-- `src/components`: composants reutilisables
-- `src/context`: gestion d'etat globale
-- `src/constants`: constantes (couleurs, traductions)
+Academic project — PFE (Projet de Fin d'Études), 2025–2026.
